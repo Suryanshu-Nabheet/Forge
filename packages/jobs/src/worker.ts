@@ -33,18 +33,48 @@ export async function stopWorker(): Promise<void> {
 }
 
 async function pollLoop(): Promise<void> {
+  let lastJanitor = 0;
   while (running) {
     try {
       const claimed = await claimJobs();
       if (claimed.length === 0) {
         await sleep(POLL_MS);
       }
-      // jobs already run inline above
+      // Periodic janitor: every 10 min, purge expired sessions and
+      // terminal-state jobs older than a day.
+      if (Date.now() - lastJanitor > 10 * 60_000) {
+        lastJanitor = Date.now();
+        await janitor().catch((err) => {
+          console.error("[worker] janitor error:", err);
+        });
+      }
     } catch (err) {
       console.error("[worker] poll error:", err);
       await sleep(2000);
     }
   }
+}
+
+/** Purge expired data: sessions past expiry, done/failed queue rows + runs. */
+async function janitor(): Promise<void> {
+  await db.execute(sql`DELETE FROM sessions WHERE expires_at < now()`);
+  await db.execute(sql`
+    DELETE FROM job_queue
+    WHERE status IN ('done','failed')
+      AND updated_at < now() - interval '1 day'
+  `);
+  await db.execute(sql`
+    DELETE FROM job_events
+    WHERE id IN (
+      SELECT je.id FROM job_events je
+      JOIN job_runs jr ON jr.id = je.job_run_id
+      WHERE jr.finished_at < now() - interval '1 day'
+    )
+  `);
+  await db.execute(sql`
+    DELETE FROM job_runs
+    WHERE finished_at < now() - interval '1 day'
+  `);
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -69,7 +99,7 @@ async function claimJobs(): Promise<ClaimedJob[]> {
 
   // Atomic claim: FOR UPDATE SKIP LOCKED via a single UPDATE ... RETURNING
   const claimed = await db.execute(sql`
-    UPDATE job_queue SET status = 'active', locked_at = now(), locked_by = ${WORKER_ID}, attempts = attempts + 1
+    UPDATE job_queue SET status = 'active', locked_at = now(), locked_by = ${WORKER_ID}, attempts = attempts + 1, updated_at = now()
     WHERE id IN (
       SELECT id FROM job_queue
       WHERE status = 'queued' AND run_at <= now()
@@ -103,7 +133,7 @@ async function runJob(job: Job): Promise<void> {
   const startedAt = Date.now();
   try {
     const result = await dispatch(queue, payload, runId);
-    await db.update(jobQueue).set({ status: "done", result: { ok: true } }).where(eq(jobQueue.id, id));
+    await db.update(jobQueue).set({ status: "done", result: { ok: true }, updatedAt: new Date() }).where(eq(jobQueue.id, id));
     await db.update(jobRuns).set({ status: "done", result: result ?? { ok: true }, finishedAt: new Date(), }).where(eq(jobRuns.id, runId));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -114,6 +144,7 @@ async function runJob(job: Job): Promise<void> {
       error: message,
       runAt: new Date(Date.now() + backoffMs(attempts)),
       lockedAt: null,
+      updatedAt: new Date(),
     }).where(eq(jobQueue.id, id));
     await db.update(jobRuns).set({ status: "failed", error: message, finishedAt: new Date() }).where(eq(jobRuns.id, runId));
   }

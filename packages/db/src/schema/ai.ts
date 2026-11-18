@@ -52,6 +52,7 @@ export const jobQueue = pgTable(
     lockedBy: text("locked_by"),
     error: text("error"),
     result: jsonb("result").$type<Record<string, unknown> | null>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("job_queue_status_idx").on(t.status, t.runAt)],
