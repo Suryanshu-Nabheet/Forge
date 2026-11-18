@@ -9,6 +9,10 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **Real Git hosting** | `git clone`/`push`/`pull` over HTTP via `git http-backend` CGI bridge. Stock git clients work unchanged. |
 | **Intent-first VCs** | Issues/Specs/Intents link to branches, commits, and PRs (`intent_links`). Branches named `i{n}-*` auto-open PRs against intent #n. |
 | **Autonomous PR review** | Every PR push triggers an async worker: security findings (secrets, eval, injection sinks, prototype pollution), logic smells, missing-test detection, and a 0–100 risk score — posted as inline PR comments. Claude API when `ANTHROPIC_API_KEY` is set; a deterministic static analyzer otherwise. |
+| **Manual PRs** | Open a pull request from any head → base pair via the UI/API — the `i{n}-*` intent convention is a convenience, not a requirement. |
+| **Branch protection** | Protected branches (default: `main`) reject force-pushes and deletions at a `pre-receive` hook. Owners manage the list per repo. |
+| **Org membership** | Private repos are readable/writable only by org members and owners, enforced across pages, API routes, git transport, search, and SSE. |
+| **PAT revocation** | Tokens and SSH keys can be revoked from Settings; revoked PATs are rejected immediately. |
 | **Semantic code search & Q&A** | Pushes trigger indexing: files are chunked (symbol-aware for code, heading-aware for prose) and embedded. `/search` does global semantic search; the repo "Ask AI" page answers natural-language questions with file:line citations. |
 | **Spec-to-PR workflow** | "Draft implementation plan" generates a structured plan (files to create/modify, steps, acceptance criteria). "Create branch scaffold" pushes a spec branch with a committed `docs/intents/*.md`. |
 | **Ephemeral previews** | Every PR push builds in an isolated sandbox — Docker adapter when available, hardened child-process adapter otherwise (sanitized env, 60s timeout, 2MB output cap, concurrency limit, process-group kill, malicious-lifecycle-script prescan). Build logs stream into the PR page. |
@@ -53,13 +57,16 @@ Sign in to the web UI with **ada@acme.dev / password123** (or register your own 
 
 ```bash
 pnpm typecheck        # tsc across all packages + apps
-pnpm test             # 35 tests across 4 suites: engine units (diff parser, heuristic
+pnpm test             # 52 tests across 5 suites: engine units (diff parser, heuristic
                       #  review, embedder, scanner), queue claim semantics, sandbox
                       #  builds (success + malicious-script blocking), auth flows
                       #  (register/login/logout/401s/session scoping), UI rendering
-                      #  (dashboard/org/repo/file view), and the full E2E git flow
-                      #  (clone, PAT push, auto-PR, AI review, preview, auth
-                      #  rejection, squash merge, Q&A citations, intent lifecycle)
+                      #  (dashboard/org/repo/file view), the full E2E git flow
+                      #  (clone, PAT push, auto-PR, manual PRs, AI review, preview,
+                      #  auth rejection, squash merge, Q&A citations, intent
+                      #  lifecycle), and the security suite (private-repo gating,
+                      #  org membership, branch protection, PAT revocation,
+                      #  hook auth, brute-force lockout)
 pnpm --filter @forge/web exec next build   # production build
 pnpm worker           # standalone worker process (optional; dev runs one in-process)
 pnpm db:push          # apply Drizzle schema
@@ -74,8 +81,8 @@ Everything optional except Postgres:
 DATABASE_URL=postgresql://user@localhost:5432/forge   # required
 FORGE_STORAGE_ROOT=apps/web/data                     # bare repos + sandboxes
 FORGE_PORT=3000                                      # web + git listen here
-ANTHROPIC_API_KEY=...                                # Claude review/QA/plans (else heuristic)
-REDIS_URL=...                                        # unused fallback-safe (Postgres queue is default)
+ANTHROPIC_API_KEY=...                                # Claude review/QA/plans (else deterministic heuristics)
+FORGE_HOOK_TOKEN=...                                 # shared secret for git hook callbacks (auto-generated)
 ```
 
 ## Architecture
@@ -86,11 +93,11 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md). Monorepo map:
 apps/web        Next.js UI + custom Node server (Next + /git CGI bridge + hooks + SSE + worker)
 apps/worker     standalone worker entry for production splits
 packages/git    bare-repo lifecycle, typed git plumbing, diff parser, archive extraction
-packages/db     Drizzle schema (18 tables), auth (scrypt sessions, PATs, SSH keys)
+packages/db     Drizzle schema (19 tables), auth (scrypt sessions, PATs, SSH keys, org membership)
 packages/jobs   post-receive handler (ref sync, auto-PR, enqueue) + job processors
 packages/ai     review engine (Claude + heuristic), embeddings, Q&A, plan generator
 packages/sandbox process + docker preview runners with prescan
-packages/queue  Postgres SKIP-LOCKED queue (BullMQ-compatible interface)
+packages/queue  Postgres SKIP-LOCKED queue (reference claim implementation)
 packages/shared domain types shared end-to-end
 ```
 

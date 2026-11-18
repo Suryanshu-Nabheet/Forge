@@ -86,7 +86,7 @@ async function claudePlan(input: PlanInput, chunks: EmbeddedChunk[]): Promise<Im
     .join("\n\n");
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-5",
+    model: "claude-sonnet-5-5",
     max_tokens: 3000,
     messages: [
       {

@@ -4,10 +4,10 @@
 
 ## 1. Guiding principles
 
-1. **Works out-of-the-box.** If Redis is absent, a Postgres-backed queue with `LISTEN/NOTIFY` runs the same jobs. If Docker is absent, previews run in a locked-down child process. If no `ANTHROPIC_API_KEY` is set, the AI layer runs a deterministic heuristic engine behind the same interface. Zero-dependency local dev is a hard requirement, not a nice-to-have.
+1. **Works out-of-the-box.** Jobs run on a Postgres-backed queue (`FOR UPDATE SKIP LOCKED`, 500ms polling, stale-`active` reaper). If Docker is absent, previews run in a locked-down child process. If no `ANTHROPIC_API_KEY` is set, the AI layer runs a deterministic heuristic engine behind the same interface. Zero-dependency local dev is a hard requirement, not a nice-to-have.
 2. **Real Git.** The server speaks the native Git **smart HTTP protocol** by shelling out to `git http-backend` as a CGI-style process, plus `git` CLI plumbing for trees, blobs, and diffs. You can `git clone http://localhost:3000/git/demo/hello.git` with the stock Git client and it just works.
 3. **One process, many jobs.** A single Node process hosts the Next.js web app, the Git HTTP transport, the background workers, and the ephemeral sandbox runner. Redis/Docker/pgvector are **optional accelerators**, each behind a feature-detecting adapter.
-4. **Types end-to-end.** tRPC for web→server calls, Drizzle for SQL, shared domain types in `packages/shared`.
+4. **Types end-to-end.** Typed Next.js route handlers + server components for web→server calls, Drizzle for SQL, shared domain types in `packages/shared`.
 
 ## 2. Monorepo layout (Turborepo + pnpm workspaces)
 
@@ -28,7 +28,7 @@ origin/                         # repo root, pnpm workspace + turborepo
 │   │   │   ├── (dash)/         # home dashboard
 │   │   │   └── [org]/[repo]/   # repo pages: code, pulls, issues, settings
 │   │   ├── src/server/         # server-only modules
-│   │   │   ├── auth.ts         # Better-Auth server instance
+│   │   │   ├── authz.ts        # authorization (org membership, visibility gates)
 │   │   │   ├── db.ts           # Drizzle client (pg driver)
 │   │   │   ├── env.ts          # zod-validated env
 │   │   │   ├── trpc.ts         # tRPC setup + routers
@@ -61,8 +61,7 @@ origin/                         # repo root, pnpm workspace + turborepo
 │   ├── queue/                # job queue abstraction
 │   │   └── src/
 │   │       ├── index.ts       # interface + feature detection
-│   │       ├── postgres.ts    # LISTEN/NOTIFY + SKIP LOCKED fallback
-│   │       └── redis.ts       # BullMQ adapter (optional)
+│   │       └── index.ts       # SKIP-LOCKED claim + backoff (Postgres only; no Redis adapter)
 │   └── sandbox/               # ephemeral preview runner
 │       └── src/
 │           ├── index.ts       # adapter selection (docker | process)
@@ -146,7 +145,7 @@ pgvector is not available on this machine (Homebrew Postgres 17 without the exte
 
 ### 5.1 Semantic indexing & Q&A
 
-**Indexing** (queued on every push): parse files with tree-sitter WASM grammars where available (TS/TSX/JS/JSX/Python) into symbol-level chunks (functions/classes with line ranges); chunk the rest (markdown, config) by heading/paragraph. Embed each chunk — Claude embedding API when configured, otherwise a deterministic hashing embedder (token n-grams → 256-dim, identifier-split camelCase/snake_case, L2-normalized). Persist with path + line range so answers cite exact locations.
+**Indexing** (queued on every push): code files are chunked into ~40-line windows aligned to top-level declarations (symbol names extracted); markdown by heading/paragraph. Chunks are embedded with a deterministic local hashing embedder (token n-grams → 256-dim, identifier-split camelCase/snake_case, L2-normalized) — no external embedding API is called today; `embedViaApi` is the seam for one. Persist with path + line range so answers cite exact locations.
 
 **Q&A** (`/search`, repo Ask box): query → same embedder → cosine over repo chunks → top-k → answer. Heuristic mode builds an extractive answer with citations ("Auth is handled in `src/auth.ts:12-48` …"); Claude mode does a RAG pass over the retrieved chunks.
 
@@ -156,9 +155,7 @@ Intent page → "Draft Implementation Plan" → queued AI plan job → structure
 
 ## 6. Background queue (`packages/queue`)
 
-Interface: `enqueue(name, payload)`, `process(handler)` with retries/backoff. Adapters:
-- **postgres** (default): `job_queue` table + `FOR UPDATE SKIP LOCKED` claim loop + `LISTEN/NOTIFY` for instant wake on the same connection pool; retries with exponential backoff.
-- **redis** (optional): BullMQ when `REDIS_URL` is set — same payloads, same handlers.
+Postgres-backed queue: `job_queue` table, atomic claim via a single `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` statement, 500ms polling, exponential-backoff retries, and a reaper that requeues jobs left `active` by a dead worker (>10 min).
 
 Job types: `semantic_index`, `pr_review`, `qa_answer`, `intent_plan`, `preview_build`. Every job writes log lines to `job_events` (streamed to the UI over SSE) and a `job_runs` row for status.
 
@@ -171,9 +168,9 @@ Every PR push triggers a preview build. Adapters, feature-detected at runtime:
 
 ## 8. Auth & sessions
 
-- Better-Auth (email/password) with Drizzle adapter over the `users/sessions/accounts/verification_tokens` tables.
+- Hand-rolled, dependency-light auth (deliberate: small auditable surface): scrypt password hashing, DB-backed sessions, `forge_session` httpOnly cookie.
 - **PATs**: generated in the UI, shown once, stored sha256-hashed. Git uses `http://user:token@host/git/…` (Basic); the API accepts `Authorization: Bearer <pat>`. Scopes: `repo:read`, `repo:write`.
-- **SSH keys**: managed in UI (title, fingerprint, publicKey) — displayed on profile; SSH transport is a documented future extension, HTTP is the MVP transport.
+- **SSH keys**: managed + revocable in UI (title, fingerprint, publicKey) — stored for future SSH transport; HTTP with PATs is the current transport.
 
 ## 9. UI structure (Next.js App Router)
 
@@ -192,7 +189,7 @@ Routes:
 
 ## 10. Migrations & running
 
-- Drizzle Kit migrations: `pnpm db:push` (dev sync) or `pnpm db:migrate` (versioned SQL in `drizzle/`).
+- Schema: `pnpm db:push` (drizzle-kit sync). The `cosine_distance` SQL function is created by test global-setup / seed scripts; there is no versioned migration directory yet.
 - `pnpm dev` — boots the custom server (Next + Git HTTP + in-process worker).
 - `pnpm worker` — standalone worker process (production split).
 - `pnpm seed` — demo org, users, repos, issues, open PRs (one with a deliberately vulnerable diff so the AI reviewer has something to catch).
@@ -208,9 +205,10 @@ Routes:
 ## 12. Testing & verification
 
 - `pnpm typecheck` — tsc across the monorepo
-- `pnpm test` — 35 Vitest tests across 4 suites, all booting real servers and driving real git where relevant:
+- `pnpm test` — 52 Vitest tests across 5 suites, all booting real servers and driving real git where relevant:
   - **unit-engines**: diff parser (line anchors, add/remove/rename), deterministic heuristic review (secrets/eval/missing tests/risk), local embedder (unit vectors, similarity ordering, determinism), lifecycle-script prescan
   - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox builds (success path streams `npm run build` output; `curl|sh` postinstall is BLOCKED pre-execution), `git archive` extraction fidelity
-  - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations
+  - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, manual PR open + duplicate 409 + no-diff 400, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations
   - **e2e-auth-issues**: anonymous 401s, register/login/logout, weak-password rejection, session-scoped keys/PATs, UI page rendering (dashboard/org/repo/file view), PR close/reopen → intent status sync, human comments, merge → intent done
-- `pnpm lint` / `pnpm build` — quality gates before "done"
+  - **e2e-security**: private-repo page gating (anon + non-member), search leakage, org takeover 403, forged hook-token 403, SSE session required, PAT create→use→revoke→rejected, SSH key delete, member promotion grants access, branch protection (force-push/deletion rejected, unprotected allowed, owner settings API), login brute-force lockout (429 + Retry-After)
+- `pnpm typecheck` / `pnpm test` / `pnpm build` — quality gates before "done" (no ESLint config yet)
