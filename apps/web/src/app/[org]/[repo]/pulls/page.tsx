@@ -16,12 +16,15 @@ export default async function PullsPage({ params }: { params: Promise<{ org: str
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold">Pull requests</h1>
-        <span className="text-xs text-[var(--text-faint)]">{open.length} open</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[var(--text-faint)]">{open.length} open</span>
+          <a href={`/${org}/${repo}/pulls/new`} className="btn btn-primary text-xs">New pull request</a>
+        </div>
       </div>
       <div className="card divide-y">
         {prs.length === 0 && (
           <div className="px-4 py-8 text-center text-[var(--text-dim)] text-[13px]">
-            No pull requests. Push a branch named <code className="mono">i&lt;n&gt;-description</code> to auto-open one from intent #n.
+            No pull requests. Push a branch named <code className="mono">i&lt;n&gt;-description</code> to auto-open one from intent #n — or use <a className="underline" href={`/${org}/${repo}/pulls/new`}>New pull request</a>.
           </div>
         )}
         {[...open, ...closed].map((p) => (

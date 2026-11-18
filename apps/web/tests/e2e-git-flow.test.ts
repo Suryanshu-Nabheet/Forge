@@ -183,6 +183,46 @@ describe("git over HTTP", () => {
       git(["-c", "credential.helper=", "push", `${BASE}/git/acme2/fresh.git`, "HEAD:evil"], { cwd: freshDir }),
     ).rejects.toThrow();
   });
+
+  it("manually opens a PR from an arbitrary branch (not intent-named)", async () => {
+    // Push a plain feature branch with a commit.
+    await git(["checkout", "-q", "-b", "feature-plain"], { cwd: freshDir });
+    await exec("bash", ["-c", `echo 'export const plain = 1;' > ${freshDir}/plain.ts`]);
+    await git(["add", "."], { cwd: freshDir });
+    await git(["-c", "user.name=T", "-c", "user.email=t@t", "commit", "-q", "-m", "feat: plain branch"], { cwd: freshDir });
+    await git(["push", "-q", `http://ada:${pat}@localhost:${PORT}/git/acme2/fresh.git`, "HEAD:feature-plain"], { cwd: freshDir });
+
+    // Open a manual PR via the new endpoint (session-authenticated).
+    const res = await sfetch(`/acme2/fresh/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ head: "feature-plain", base: "main", title: "Plain feature" }),
+    });
+    const data = (await res.json()) as { ok: boolean; number: number };
+    expect(res.ok).toBe(true);
+    expect(data.number).toBeGreaterThan(1);
+
+    // Duplicate open is rejected with 409.
+    const dupe = await sfetch(`/acme2/fresh/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ head: "feature-plain", base: "main" }),
+    });
+    expect(dupe.status).toBe(409);
+
+    // The manual PR got AI review + preview jobs too.
+    await waitJobCount("pr_review", 2);
+    await waitJobCount("preview_build", 2);
+  });
+
+  it("rejects a manual PR with no diff (head == base)", async () => {
+    const res = await sfetch(`/acme2/fresh/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ head: "main", base: "main" }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("merge", () => {
