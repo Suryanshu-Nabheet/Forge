@@ -83,6 +83,31 @@ export async function loginUser(email: string, password: string): Promise<AuthUs
   return { id: user.id, email: user.email, name: user.name, handle: user.handle, avatarUrl: user.avatarUrl };
 }
 
+// ---------- login rate limiting (brute-force protection) ----------
+// In-memory sliding window keyed by email+ip; 5 failures/min → 429 territory.
+const MAX_FAILURES = 5;
+const WINDOW_MS = 60_000;
+const failures = new Map<string, number[]>();
+
+export function loginBlocked(email: string, ip: string): boolean {
+  const now = Date.now();
+  const key = `${email}|${ip}`;
+  const list = (failures.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+  failures.set(key, list);
+  return list.length >= MAX_FAILURES;
+}
+
+export function recordLoginFailure(email: string, ip: string): void {
+  const key = `${email}|${ip}`;
+  const list = failures.get(key) ?? [];
+  list.push(Date.now());
+  failures.set(key, list);
+}
+
+export function clearLoginFailures(email: string, ip: string): void {
+  failures.delete(`${email}|${ip}`);
+}
+
 // ---------- personal access tokens ----------
 
 export interface PatRecord {

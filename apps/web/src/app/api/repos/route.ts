@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db, organizations, repositories, orgMembers } from "@forge/db";
-import { initBareRepo } from "@forge/git";
+import { initBareRepo, repoGitDir, setProtectedBranches } from "@forge/git";
 import { requireUser, unauthorized } from "@/server/session";
 import { roleInOrg } from "@/server/authz";
 
@@ -43,14 +43,17 @@ export async function POST(req: Request) {
     .where(and(eq(repositories.orgId, orgId), eq(repositories.name, name))).limit(1);
   if (dupe.length > 0) return NextResponse.json({ error: "repo already exists" }, { status: 409 });
 
+  const protectedBranches = ["main"];
   const [repo] = await db.insert(repositories).values({
     orgId,
     name,
     description: body.description || null,
     visibility: body.visibility === "private" ? "private" : "public",
+    protectedBranches,
   }).returning({ id: repositories.id });
 
   await initBareRepo(orgSlug, name);
+  await setProtectedBranches(repoGitDir(orgSlug, name), protectedBranches);
 
   return NextResponse.json({ id: repo!.id, orgSlug, name });
 }

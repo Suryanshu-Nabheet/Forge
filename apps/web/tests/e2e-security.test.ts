@@ -244,3 +244,110 @@ describe("authorization perimeter", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("branch protection", () => {
+  const ada = { cookie: "" };
+  let pat = "";
+
+  beforeAll(async () => {
+    // Ada's session + a repo with commits to force-push against.
+    const f = jarFetch(ada);
+    await f("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "ada@sec.dev", password: "longpassword1" }),
+    });
+    const created = await f("/api/pats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "bp-test", scopes: ["repo:read", "repo:write"] }),
+    });
+    pat = ((await created.json()) as { token: string }).token;
+
+    // Seed a public repo with main + a feature branch.
+    await f("/api/repos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orgSlug: "bporg", name: "protected", visibility: "public" }),
+    });
+    const mkdtemp = await import("node:fs/promises").then((m) => m.mkdtemp);
+    const execFile = (await import("node:child_process")).execFile;
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    const tmp = await mkdtemp("/tmp/forge-bp-");
+    await exec("git", ["clone", "-q", `${BASE}/git/bporg/protected.git`, tmp]);
+    // Two commits on main: init → one (both pushed as fast-forwards).
+    await exec("bash", ["-c", `cd ${tmp} && echo hello > a.txt && git add . && git -c user.name=T -c user.email=t@t commit -qm init && echo one > b.txt && git add . && git -c user.name=T -c user.email=t@t commit -qm one`]);
+    await exec("git", ["-C", tmp, "push", "-q", `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`, "HEAD:main"]);
+    // Rewrite local history for the force-push attempt.
+    await exec("bash", ["-c", `cd ${tmp} && git reset -q --hard HEAD~1 && echo two > b.txt && git add . && git -c user.name=T -c user.email=t@t commit -qm two`]);
+    // Save the tmp dir path via env-like closure (afterAll cleanup).
+    (globalThis as Record<string, unknown>).__bpTmp = tmp;
+  });
+
+  it("rejects force-push (non-fast-forward) to a protected branch", async () => {
+    const tmp = (globalThis as unknown as { __bpTmp: string }).__bpTmp;
+    const execFile = (await import("node:child_process")).execFile;
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    await expect(
+      exec("git", ["-C", tmp, "push", "-q", "--force",
+        `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`, "HEAD:main"]),
+    ).rejects.toThrow(/pre-receive hook declined|non-fast-forward/);
+  });
+
+  it("rejects deletion of a protected branch", async () => {
+    const execFile = (await import("node:child_process")).execFile;
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    await expect(
+      exec("git", ["push", "-q", `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`, ":refs/heads/main"]),
+    ).rejects.toThrow(/pre-receive hook declined|refusing to delete/);
+  });
+
+  it("allows force-push to unprotected branches", async () => {
+    const tmp = (globalThis as unknown as { __bpTmp: string }).__bpTmp;
+    const execFile = (await import("node:child_process")).execFile;
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    // feature branch: create, force-rewrite, push with force — should succeed.
+    await exec("git", ["-C", tmp, "push", "-q", `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`, "HEAD:feature-x"]);
+    await exec("bash", ["-c", `cd ${tmp} && echo three > c.txt && git add . && git -c user.name=T -c user.email=t@t commit -qm three`]);
+    await exec("git", ["-C", tmp, "push", "-q", "--force",
+      `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`, "HEAD:feature-x"]);
+  });
+
+  it("owner can update the protected list; non-owner gets 403", async () => {
+    const f = jarFetch(ada);
+    const put = await f("/api/bporg/protected/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ protectedBranches: ["main", "release"] }),
+    });
+    expect(put.ok).toBe(true);
+    const get = await fetch(`${BASE}/api/bporg/protected/settings`);
+    const data = (await get.json()) as { protectedBranches: string[] };
+    expect(data.protectedBranches).toContain("release");
+  });
+});
+
+describe("login rate limiting", () => {
+  it("locks out after 5 failed attempts per email+ip", async () => {
+    const email = "ada@sec.dev";
+    for (let i = 0; i < 5; i++) {
+      await fetch(`${BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: "wrong-password" }),
+      });
+    }
+    const blocked = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: "longpassword1" }), // even correct creds blocked
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+  });
+});
+

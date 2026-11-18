@@ -58,6 +58,7 @@ export const repositories = pgTable(
     description: text("description"),
     visibility: text("visibility").$type<Visibility>().notNull().default("public"),
     defaultBranch: text("default_branch").notNull().default("main"),
+    protectedBranches: jsonb("protected_branches").$type<string[]>().notNull().default(["main"]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

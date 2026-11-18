@@ -72,14 +72,53 @@ export function hookToken(): string {
 }
 
 
-/** Create a bare repo with post-receive hook installed. Returns its absolute path. */
+/**
+ * Branch protection: a pre-receive hook that rejects non-fast-forward
+ * updates (force pushes) and deletions of protected branches. The
+ * protected list is stored in the bare repo's git config
+ * (forge.protectedBranches) so the hook has no DB dependency.
+ */
+const PRE_RECEIVE_HOOK = [
+  "#!/bin/sh",
+  "# Forge pre-receive hook — enforce branch protection.",
+  "zero=\"0000000000000000000000000000000000000000\"",
+  "while read old new ref; do",
+  '  case "$ref" in',
+  "    refs/heads/*) branch=\"${ref#refs/heads/}\" ;;",
+  "    *) continue ;;",
+  "  esac",
+  '  protected="$(git config --get forge.protectedBranches 2>/dev/null || echo main)"',
+  '  case ":$protected:" in',
+  '    *":$branch:"*)',
+  '      if [ "$new" = "$zero" ]; then',
+  '        echo "forge: refusing to delete protected branch \\"$branch\\"" >&2',
+  "        exit 1",
+  "      fi",
+  '      if [ "$old" != "$zero" ] && [ "$(git merge-base --is-ancestor $old $new; echo $?)" != "0" ]; then',
+  '        echo "forge: refusing non-fast-forward update to protected branch \\"$branch\\"" >&2',
+  "        exit 1",
+  "      fi",
+  "      ;;",
+  "  esac",
+  "done",
+  "exit 0",
+].join("\n") + "\n";
+
+/** Create a bare repo with post-receive + pre-receive hooks installed. */
 export async function initBareRepo(orgSlug: string, repoName: string): Promise<string> {
   const gitDir = repoGitDir(orgSlug, repoName);
   await mkdir(path.dirname(gitDir), { recursive: true });
   await exec("git", ["init", "--bare", "--initial-branch=main", gitDir]);
   const hookPath = path.join(gitDir, "hooks", "post-receive");
   await writeFile(hookPath, POST_RECEIVE_HOOK, { mode: 0o755 });
+  const prePath = path.join(gitDir, "hooks", "pre-receive");
+  await writeFile(prePath, PRE_RECEIVE_HOOK, { mode: 0o755 });
   return gitDir;
+}
+
+/** Sync the protected-branch list into the bare repo's git config. */
+export async function setProtectedBranches(gitDir: string, branches: string[]): Promise<void> {
+  await exec("git", ["--git-dir", gitDir, "config", "forge.protectedBranches", branches.join(",")]);
 }
 
 /** Run git in the bare repo. All args are passed by this package's typed helpers only. */
