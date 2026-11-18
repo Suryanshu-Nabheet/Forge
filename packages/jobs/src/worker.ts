@@ -60,6 +60,13 @@ interface ClaimedJob {
 }
 
 async function claimJobs(): Promise<ClaimedJob[]> {
+  // Reclaim jobs stuck in 'active' (worker died mid-run) after a grace period.
+  await db.execute(sql`
+    UPDATE job_queue SET status = 'queued', locked_at = NULL, locked_by = NULL
+    WHERE status = 'active' AND locked_at < now() - interval '10 minutes'
+      AND locked_by <> ${WORKER_ID}
+  `);
+
   // Atomic claim: FOR UPDATE SKIP LOCKED via a single UPDATE ... RETURNING
   const claimed = await db.execute(sql`
     UPDATE job_queue SET status = 'active', locked_at = now(), locked_by = ${WORKER_ID}, attempts = attempts + 1
@@ -146,7 +153,22 @@ async function logEvent(runId: number, level: "info" | "warn" | "error", message
 
 // ---------- job implementations ----------
 
+// Serialize AI-review writes per PR: overlapping runs must not interleave
+// delete/insert of ai_review comments (duplicated or halved comment sets).
+const reviewLocks = new Map<number, Promise<unknown>>();
+
 async function runPrReview(payload: { repoId: number; prId: number }, runId: number): Promise<JobResult> {
+  const prev = reviewLocks.get(payload.prId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => runPrReviewInner(payload, runId));
+  reviewLocks.set(payload.prId, next);
+  try {
+    return await next;
+  } finally {
+    if (reviewLocks.get(payload.prId) === next) reviewLocks.delete(payload.prId);
+  }
+}
+
+async function runPrReviewInner(payload: { repoId: number; prId: number }, runId: number): Promise<JobResult> {
   const prRows = await db.select().from(pullRequests).where(eq(pullRequests.id, payload.prId)).limit(1);
   const pr = prRows[0];
   if (!pr) throw new Error(`pr ${payload.prId} not found`);
@@ -169,7 +191,7 @@ async function runPrReview(payload: { repoId: number; prId: number }, runId: num
   const analysis = await analyzeDiffForReview(diff);
   await logEvent(runId, "info", `Analysis complete: ${analysis.findings.length} findings, risk ${analysis.riskScore}/100 (${analysis.mode} mode)`, pr.id);
 
-  // Remove previous AI review comments, post fresh ones.
+  // Remove previous AI review comments, post fresh ones (inside the per-PR lock).
   await db.delete(reviewComments).where(and(eq(reviewComments.prId, pr.id), eq(reviewComments.kind, "ai_review")));
   for (const f of analysis.findings) {
     await db.insert(reviewComments).values({
@@ -373,7 +395,7 @@ async function runPreviewBuild(payload: { repoId: number; prId: number; commitSh
     commitSha: payload.commitSha,
     previewId: preview.id,
     onLog: (line) => {
-      void logEvent(runId, "info", line, payload.prId);
+      void logEvent(runId, "info", line, payload.prId).catch(() => {});
     },
   });
   await db.update(previews).set({

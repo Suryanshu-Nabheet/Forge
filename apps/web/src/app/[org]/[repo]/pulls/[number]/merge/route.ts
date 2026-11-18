@@ -33,6 +33,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
 
   const gitDir = repoGitDir(org, repo);
   const work = await mkdtemp(path.join(tmpdir(), "forge-merge-"));
+
+  // Refuse refs that could be parsed as git options (defends argv injection).
+  for (const ref of [pr.headBranch, pr.baseBranch]) {
+    if (ref.startsWith("-") || ref.includes("..") || /[\r\n\0]/.test(ref)) {
+      return NextResponse.json({ error: "invalid branch name" }, { status: 400 });
+    }
+  }
+
   try {
     await exec("git", ["clone", "--quiet", gitDir, work]);
     await exec("git", ["-C", work, "fetch", "--quiet", gitDir, `refs/heads/${pr.headBranch}:refs/heads/${pr.headBranch}`]);
@@ -41,15 +49,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     const author = ["-c", "user.name=forge-bot", "-c", "user.email=bot@forge.dev"];
     let mergeSha: string;
     if (strategy === "squash") {
-      await exec("git", ["-C", work, ...author, "merge", "--squash", `origin/${pr.headBranch}`.replace("origin/", "")]);
+      await exec("git", ["-C", work, ...author, "merge", "--squash", `refs/heads/${pr.headBranch}`]);
       await exec("git", ["-C", work, ...author, "commit", "--quiet", "-m", `${pr.title} (#${pr.number})`]);
     } else if (strategy === "rebase") {
       await exec("git", ["-C", work, "checkout", "--quiet", pr.headBranch]);
       await exec("git", ["-C", work, ...author, "rebase", pr.baseBranch]);
       await exec("git", ["-C", work, "checkout", "--quiet", pr.baseBranch]);
-      await exec("git", ["-C", work, ...author, "merge", "--ff-only", pr.headBranch]);
+      await exec("git", ["-C", work, ...author, "merge", "--ff-only", `refs/heads/${pr.headBranch}`]);
     } else {
-      await exec("git", ["-C", work, ...author, "merge", "--no-ff", "-m", `Merge pull request #${pr.number}: ${pr.title}`, pr.headBranch]);
+      await exec("git", ["-C", work, ...author, "merge", "--no-ff", "-m", `Merge pull request #${pr.number}: ${pr.title}`, `refs/heads/${pr.headBranch}`]);
     }
     mergeSha = (await exec("git", ["-C", work, "rev-parse", "HEAD"])).stdout.trim();
     await exec("git", ["-C", work, "push", "--quiet", gitDir, `HEAD:refs/heads/${pr.baseBranch}`]);
@@ -70,6 +78,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
 
     await db.insert(activities).values({
       repoId: r.repoId,
+      userId: user.id,
       type: "pr_merged",
       data: { title: pr.title, number: pr.number, strategy },
     });

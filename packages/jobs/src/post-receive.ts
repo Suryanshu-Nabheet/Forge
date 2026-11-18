@@ -2,7 +2,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@forge/db";
-import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, jobRuns, activities } from "@forge/db";
+import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, activities } from "@forge/db";
 import { repoGitDir, listBranches, revParse, revListCommits, commitParents, commitStats, defaultBranch } from "@forge/git";
 
 interface PostReceiveBody {
@@ -118,47 +118,58 @@ async function syncBranch(
         .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.headBranch, branchName), eq(pullRequests.status, "open")))
         .limit(1);
       let prId: number;
+      let prNumber: number;
       if (openPr[0]) {
         prId = openPr[0]!.id;
+        prNumber = openPr[0]!.number;
         await db.update(pullRequests).set({ headSha: newSha, updatedAt: new Date() }).where(eq(pullRequests.id, prId));
       } else {
-        const [{ max }] = await db
-          .select({ max: sql<number>`coalesce(max(${pullRequests.number}), 0)` })
-          .from(pullRequests)
-          .where(eq(pullRequests.repoId, repoId));
         const baseSha = await revParse(gitDir, repoDefaultBranch);
-        const [pr] = await db
-          .insert(pullRequests)
-          .values({
-            repoId,
-            number: max + 1,
-            title: it.title,
-            description: `Implements intent #${it.number}: ${it.title}`,
-            baseBranch: repoDefaultBranch,
-            headBranch: branchName,
-            headSha: newSha,
-            baseSha,
-            authorId: it.authorId,
-            intentId: it.id,
-          })
-          .returning({ id: pullRequests.id, number: pullRequests.number });
+        // Retry on unique-number conflicts from concurrent pushes.
+        let pr: { id: number; number: number } | undefined;
+        for (let attempt = 0; attempt < 3 && !pr; attempt++) {
+          const [{ max }] = await db
+            .select({ max: sql<number>`coalesce(max(${pullRequests.number}), 0)` })
+            .from(pullRequests)
+            .where(eq(pullRequests.repoId, repoId));
+          try {
+            [pr] = await db
+              .insert(pullRequests)
+              .values({
+                repoId,
+                number: max + 1,
+                title: it.title,
+                description: `Implements intent #${it.number}: ${it.title}`,
+                baseBranch: repoDefaultBranch,
+                headBranch: branchName,
+                headSha: newSha,
+                baseSha,
+                authorId: it.authorId,
+                intentId: it.id,
+              })
+              .returning({ id: pullRequests.id, number: pullRequests.number });
+          } catch (err) {
+            if (attempt === 2) throw err;
+            await new Promise((r) => setTimeout(r, 50 + Math.random() * 100));
+          }
+        }
         if (!pr) throw new Error("pr creation failed");
         prId = pr.id;
+        prNumber = pr.number;
         await db.update(intents).set({ linkedPrId: prId, status: "in_review" }).where(eq(intents.id, it.id));
-        await db.insert(intentLinks).values({ intentId: it.id, kind: "pr", value: String(pr.number) });
+        await db.insert(intentLinks).values({ intentId: it.id, kind: "pr", value: String(prNumber) });
         await db.insert(activities).values({
           repoId,
           userId: it.authorId,
           type: "pr_opened",
-          data: { title: it.title, number: max + 1, branch: branchName },
+          data: { title: it.title, number: prNumber, branch: branchName },
         });
       }
 
       // link intent to the pushed commit
       await db.insert(intentLinks).values({ intentId: it.id, kind: "commit", value: newSha });
 
-      // 5. enqueue: semantic index, AI PR review, preview build
-      await enqueue("semantic_index", { repoId, branch: branchName, commitSha: newSha });
+      // 5. enqueue: AI PR review + preview build (semantic index queued below, once)
       await enqueue("pr_review", { repoId, prId });
       await enqueue("preview_build", { repoId, prId, commitSha: newSha, branch: branchName });
     }
@@ -171,11 +182,5 @@ async function syncBranch(
 export async function enqueue(queue: string, payload: Record<string, unknown>): Promise<number> {
   const [job] = await db.insert(jobQueue).values({ queue, payload }).returning({ id: jobQueue.id });
   if (!job) throw new Error("enqueue failed");
-  await db.insert(jobRuns).values({
-    jobQueueId: job.id,
-    type: queue as never,
-    payload,
-    status: "queued",
-  });
   return job.id;
 }

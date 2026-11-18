@@ -116,11 +116,12 @@ export async function verifyPat(token: string): Promise<{ userId: number; scopes
     .limit(1);
   const row = rows[0];
   if (!row) return null;
-  // fire-and-forget lastUsed update
-  void db
+  // fire-and-forget lastUsed update (never crash the request path)
+  db
     .update(personalAccessTokens)
     .set({ lastUsedAt: new Date() })
-    .where(eq(personalAccessTokens.tokenHash, tokenHash));
+    .where(eq(personalAccessTokens.tokenHash, tokenHash))
+    .catch(() => {});
   return { userId: row.userId, scopes: row.scopes };
 }
 
