@@ -1,0 +1,96 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+interface Notification {
+  id: number;
+  type: string;
+  repo: string;
+  actor: string | null;
+  createdAt: string | null;
+  unread: boolean;
+  data: Record<string, unknown>;
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  pr_opened: "opened a pull request",
+  pr_merged: "merged a pull request",
+  pr_closed: "closed a pull request",
+  pr_reopened: "reopened a pull request",
+  pr_approved: "approved a pull request",
+  pr_changes_requested: "requested changes on a pull request",
+  intent_created: "created an intent",
+  intent_scaffolded: "scaffolded a branch for an intent",
+};
+
+export default function NotificationsPage() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch("/api/notifications");
+      if (res.ok) {
+        const data = (await res.json()) as { notifications: Notification[]; unread: number };
+        setNotifications(data.notifications);
+        setUnread(data.unread);
+        // Mark read once rendered.
+        await fetch("/api/notifications", { method: "POST" });
+      }
+      setLoaded(true);
+    })();
+  }, []);
+
+  function hrefFor(n: Notification): string {
+    const num = (n.data as { number?: number }).number;
+    if (n.type.startsWith("pr_") && typeof num === "number") return `/${n.repo}/pulls/${num}`;
+    if (n.type.startsWith("intent") && typeof num === "number") return `/${n.repo}/issues/${num}`;
+    return `/${n.repo}`;
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-lg font-semibold">Inbox</h1>
+        <span className="text-xs text-[var(--text-faint)]">{unread} unread</span>
+      </div>
+      <div className="card divide-y">
+        {!loaded && <div className="px-4 py-8 text-center text-[13px] text-[var(--text-dim)]">loading…</div>}
+        {loaded && notifications.length === 0 && (
+          <div className="px-4 py-8 text-center text-[13px] text-[var(--text-dim)]">
+            Nothing here yet. Activity from your organizations will show up in this feed.
+          </div>
+        )}
+        {notifications.map((n) => (
+          <a key={n.id} href={hrefFor(n)} className="block px-4 py-3 hover:bg-[var(--bg-hover)]">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className={`text-[13px] ${n.unread ? "font-semibold" : "text-[var(--text-dim)]"}`}>
+                {n.actor ?? "someone"}{" "}
+                <span className="text-[var(--text-dim)]">{TYPE_LABELS[n.type] ?? n.type}</span>
+              </span>
+              {n.unread && <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />}
+              <span className="flex-1" />
+              <span className="mono text-xs text-[var(--text-faint)]">{n.repo}</span>
+            </div>
+            {"title" in n.data && (
+              <div className="text-xs text-[var(--text-faint)] mt-0.5 truncate">
+                {String((n.data as { title?: string }).title)}
+              </div>
+            )}
+            <div className="text-[11px] text-[var(--text-faint)] mt-0.5">{timeAgo(n.createdAt)}</div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}

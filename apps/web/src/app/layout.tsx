@@ -4,6 +4,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { SignOutButton } from "@/components/SignOutButton";
 import { currentUser } from "@/server/session";
 import { listRepos } from "@/server/api";
+import { countUnreadNotifications } from "@/server/api";
 
 export const metadata: Metadata = {
   title: "Forge",
@@ -13,12 +14,14 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   let repos: Array<{ orgSlug: string; name: string }> = [];
   let userName: string | null = null;
+  let unread = 0;
   try {
     repos = (await listRepos()).map((r) => ({ orgSlug: r.orgSlug, name: r.name }));
   } catch { repos = []; } // palette degrades gracefully pre-migration
   try {
     const u = await currentUser();
     userName = u?.name ?? null;
+    if (u) unread = await countUnreadNotifications(u.id);
   } catch { userName = null; }
   return (
     <html lang="en" className="dark">
@@ -28,11 +31,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <header className="border-b sticky top-0 z-40 backdrop-blur" style={{ background: "color-mix(in srgb, var(--bg) 85%, transparent)" }}>
             <nav className="max-w-6xl mx-auto px-4 h-12 flex items-center gap-5">
               <a href="/" className="font-bold tracking-tight flex items-center gap-2">
-                <span className="text-base">⬡</span> FORGE<span className="text-[var(--accent)]">NEXT</span>
+                <span className="text-base">⬡</span> FORGE
               </a>
               <a href="/" className="text-[13px] text-[var(--text-dim)] hover:text-[var(--text)]">Dashboard</a>
               <a href="/search" className="text-[13px] text-[var(--text-dim)] hover:text-[var(--text)]">Search</a>
               <a href="/new" className="text-[13px] text-[var(--text-dim)] hover:text-[var(--text)]">New</a>
+              <a href="/notifications" className="text-[13px] text-[var(--text-dim)] hover:text-[var(--text)] flex items-center gap-1.5">
+                Inbox
+                {unread > 0 && (
+                  <span className="bg-[var(--accent)] text-[var(--bg)] text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-4 text-center">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                )}
+              </a>
               <div className="flex-1" />
               <UserChip name={userName} />
             </nav>

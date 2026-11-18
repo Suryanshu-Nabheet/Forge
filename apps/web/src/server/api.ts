@@ -176,6 +176,24 @@ export async function prJobEvents(prId: number) {
   return events;
 }
 
+// ---------- notifications ----------
+
+/** Unread activity count for the nav badge: activities newer than the
+ * user's notificationsReadAt marker, across their orgs. */
+export async function countUnreadNotifications(userId: number): Promise<number> {
+  const rows = await db.execute(sql`
+    SELECT count(*)::int AS n
+    FROM activities a
+    JOIN repositories r ON r.id = a.repo_id
+    JOIN organizations o ON o.id = r.org_id
+    WHERE (o.owner_id = ${userId} OR o.id IN (
+        SELECT org_id FROM org_members WHERE user_id = ${userId}
+      ))
+      AND a.created_at > (SELECT notifications_read_at FROM users WHERE id = ${userId})
+  `);
+  return Number((rows.rows[0] as { n: number } | undefined)?.n ?? 0);
+}
+
 // ---------- intents ----------
 
 export async function listIntents(repoId: number): Promise<IntentSummary[]> {

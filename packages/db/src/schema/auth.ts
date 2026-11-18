@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   handle: text("handle").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   avatarUrl: text("avatar_url"),
+  notificationsReadAt: timestamp("notifications_read_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

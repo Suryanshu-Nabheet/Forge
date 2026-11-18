@@ -338,3 +338,41 @@ describe("repository + intent + PR lifecycle", () => {
     expect(rows[0]!.status).toBe("done");
   });
 });
+
+describe("notifications inbox", () => {
+  const jar = { cookie: "" };
+  const f = () => jarFetch(jar);
+
+  beforeAll(async () => {
+    const res = await f()("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "zoe@test.dev", password: "longpassword1" }),
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("lists activity from the user's orgs and marks read", async () => {
+    const res = await f()("/api/notifications");
+    const data = (await res.json()) as {
+      notifications: Array<{ type: string; repo: string; unread: boolean }>;
+      unread: number;
+    };
+    expect(data.notifications.length).toBeGreaterThan(0);
+    // The widget repo generated pr_opened/pr_merged activities.
+    expect(data.notifications.some((n) => n.repo === "zoecorp/widgets")).toBe(true);
+    expect(data.unread).toBeGreaterThanOrEqual(0);
+
+    // Mark read → unread drops to 0 (marker set to now; nothing newer).
+    const mark = await f()("/api/notifications", { method: "POST" });
+    expect(mark.ok).toBe(true);
+    const after = await f()("/api/notifications");
+    const data2 = (await after.json()) as { unread: number };
+    expect(data2.unread).toBe(0);
+  });
+
+  it("requires a session", async () => {
+    const res = await fetch(`${BASE}/api/notifications`);
+    expect(res.status).toBe(401);
+  });
+});
