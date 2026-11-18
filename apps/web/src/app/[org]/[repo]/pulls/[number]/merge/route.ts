@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, organizations, repositories, pullRequests, branches, activities, intents } from "@forge/db";
+import { db, organizations, repositories, pullRequests, branches, activities, intents, prApprovals } from "@forge/db";
 import { repoGitDir, revParse } from "@forge/git";
 
 const exec = promisify(execFile);
@@ -30,6 +30,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   const pr = prRows[0];
   if (!pr) return NextResponse.json({ error: "pr not found" }, { status: 404 });
   if (pr.status !== "open") return NextResponse.json({ error: `pr already ${pr.status}` }, { status: 409 });
+
+  // Approval gate: merging INTO a protected branch requires ≥1 approval
+  // (from someone other than the PR author) and no outstanding
+  // changes_requested reviews.
+  const protectedRows = (await db.select({ protectedBranches: repositories.protectedBranches })
+    .from(repositories).where(eq(repositories.id, r.repoId)).limit(1))[0];
+  const isProtected = (protectedRows?.protectedBranches ?? ["main"]).includes(pr.baseBranch);
+  if (isProtected) {
+    const reviews = await db.select({ state: prApprovals.state, userId: prApprovals.userId })
+      .from(prApprovals).where(eq(prApprovals.prId, pr.id));
+    const blocking = reviews.some((v) => v.state === "changes_requested");
+    const approvals = reviews.filter((v) => v.state === "approved" && v.userId !== pr.authorId);
+    if (blocking) {
+      return NextResponse.json({ error: "changes were requested on this pull request" }, { status: 403 });
+    }
+    if (approvals.length === 0) {
+      return NextResponse.json({ error: "merging into a protected branch requires at least one approving review" }, { status: 403 });
+    }
+  }
 
   const gitDir = repoGitDir(org, repo);
   const work = await mkdtemp(path.join(tmpdir(), "forge-merge-"));

@@ -297,7 +297,34 @@ describe("repository + intent + PR lifecycle", () => {
     rows = await sql("select kind, body from review_comments");
     expect(rows.some((r) => r.body.includes("looks great"))).toBe(true);
 
-    // merge → PR merged + intent done
+    // merge is blocked: main is protected and nobody approved yet
+    const blocked = await f()(`/zoecorp/widgets/pulls/1/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy: "merge" }),
+    });
+    expect(blocked.status).toBe(403);
+
+    // second user approves, then merge goes through
+    const reg = await fetch(`${BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "rita@test.dev", name: "Rita", handle: "rita", password: "longpassword1" }),
+    });
+    expect(reg.ok).toBe(true);
+    const ritaCookie = (reg.headers.get("set-cookie") ?? "").split(";")[0]!;
+    await sql(
+      `INSERT INTO org_members (org_id, user_id, role)
+       SELECT o.id, u.id, 'member' FROM organizations o, users u
+       WHERE o.slug='zoecorp' AND u.handle='rita'`,
+    );
+    const approve = await fetch(`${BASE}/api/zoecorp/widgets/pulls/1/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: ritaCookie },
+      body: JSON.stringify({ state: "approved" }),
+    });
+    expect(approve.ok).toBe(true);
+
     const mergeRes = await f()(`/zoecorp/widgets/pulls/1/merge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

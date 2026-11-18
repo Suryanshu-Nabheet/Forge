@@ -229,9 +229,53 @@ describe("git over HTTP", () => {
 });
 
 describe("merge", () => {
-  it("merges the PR (squash) and marks it merged", async () => {
+  it("blocks merge into protected main without approval", async () => {
     const rows = (await db.query<{ number: number }>(`SELECT number FROM pull_requests ORDER BY id LIMIT 1`)).rows;
     const num = rows[0]!.number;
+    const res = await sfetch(`/acme2/fresh/pulls/${num}/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy: "squash" }),
+    });
+    expect(res.status).toBe(403);
+    const data = (await res.json()) as { error?: string };
+    expect(data.error).toMatch(/approving review/);
+  });
+
+  it("second user approves; author self-approval rejected; merge proceeds", async () => {
+    // Use the manual PR (feature-plain, authored by ada) — the auto-PR has a null author.
+    const rows = (await db.query<{ number: number }>(`SELECT number FROM pull_requests WHERE head_branch='feature-plain'`)).rows;
+    const num = rows[0]!.number;
+
+    // Author cannot approve their own PR.
+    const self = await sfetch(`/api/acme2/fresh/pulls/${num}/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: "approved" }),
+    });
+    expect(self.status).toBe(403);
+
+    // A second user registers, is added to the org, and approves.
+    const reg = await fetch(`${BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "grace@acme.dev", name: "Grace Hopper", handle: "grace", password: "longpassword1" }),
+    });
+    const graceCookie = (reg.headers.get("set-cookie") ?? "").split(";")[0]!;
+    await db.query(
+      `INSERT INTO org_members (org_id, user_id, role)
+       SELECT o.id, u.id, 'member' FROM organizations o, users u
+       WHERE o.slug='acme2' AND u.handle='grace'`,
+    );
+
+    const approve = await fetch(`${BASE}/api/acme2/fresh/pulls/${num}/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: graceCookie },
+      body: JSON.stringify({ state: "approved" }),
+    });
+    expect(approve.ok).toBe(true);
+
+    // Merge now goes through.
     const res = await sfetch(`/acme2/fresh/pulls/${num}/merge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

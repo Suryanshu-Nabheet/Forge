@@ -52,6 +52,25 @@ export const pullRequests = pgTable(
   ],
 );
 
+export const prApprovals = pgTable(
+  "pr_approvals",
+  {
+    id: serial("id").primaryKey(),
+    prId: integer("pr_id")
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<"approved" | "changes_requested">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pr_approvals_pr_user_idx").on(t.prId, t.userId),
+    index("pr_approvals_pr_idx").on(t.prId),
+  ],
+);
+
 export const reviewComments = pgTable(
   "review_comments",
   {
