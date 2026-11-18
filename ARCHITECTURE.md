@@ -1,4 +1,4 @@
-# FORGE-NEXT — Architecture
+# Forge — Architecture
 
 > An AI-native alternative to GitHub: intent-first version control, autonomous PR review, zero-config ephemeral previews, semantic code search, and keyboard-first issue tracking.
 

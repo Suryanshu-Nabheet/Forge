@@ -53,13 +53,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ org: s
       (intent.plan
         ? `## Plan\n\n${intent.plan.overview}\n\n### Steps\n${intent.plan.steps.map((s) => `- ${s}`).join("\n")}\n`
         : "") +
-        `\n---\n_Scaffolded by FORGE-NEXT spec-to-PR workflow._\n`;
+        `\n---\n_Scaffolded by Forge spec-to-PR workflow._\n`;
     const specPath = intent.plan?.filesToCreate.find((f) => f.path.endsWith(".md"))?.path ?? `docs/intents/${slug}.md`;
     const abs = path.join(work, specPath);
     await exec("mkdir", ["-p", path.dirname(abs)]);
     await writeFile(abs, spec);
     await exec("git", ["-C", work, "add", "."]);
-    await exec("git", ["-C", work, "-c", "user.name=forge-bot", "-c", "user.email=bot@forge.next", "commit", "--quiet", "-m", `specs: scaffold intent #${num}`]);
+    await exec("git", ["-C", work, "-c", "user.name=forge-bot", "-c", "user.email=bot@forge.dev", "commit", "--quiet", "-m", `specs: scaffold intent #${num}`]);
     await exec("git", ["-C", work, "push", "--quiet", gitDir, `HEAD:refs/heads/${branchName}`]);
 
     await db.update(intents).set({ branchName, status: "in_progress" }).where(eq(intents.id, intent.id));

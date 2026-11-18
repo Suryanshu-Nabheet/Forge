@@ -1,4 +1,4 @@
-// FORGE-NEXT custom server: Next.js UI + git smart HTTP + internal hooks + SSE.
+// Forge custom server: Next.js UI + git smart HTTP + internal hooks + SSE.
 // This is the single process story: `pnpm dev` boots web + git + workers together.
 
 import { createServer, type Server } from "node:http";

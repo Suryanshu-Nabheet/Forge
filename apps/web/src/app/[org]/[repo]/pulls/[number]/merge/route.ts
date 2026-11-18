@@ -44,7 +44,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     await exec("git", ["-C", work, "fetch", "--quiet", gitDir, `refs/heads/${pr.headBranch}:refs/heads/${pr.headBranch}`]);
     await exec("git", ["-C", work, "checkout", "--quiet", pr.baseBranch]);
 
-    const author = ["-c", "user.name=forge-bot", "-c", "user.email=bot@forge.next"];
+    const author = ["-c", "user.name=forge-bot", "-c", "user.email=bot@forge.dev"];
     let mergeSha: string;
     if (strategy === "squash") {
       await exec("git", ["-C", work, ...author, "merge", "--squash", `origin/${pr.headBranch}`.replace("origin/", "")]);

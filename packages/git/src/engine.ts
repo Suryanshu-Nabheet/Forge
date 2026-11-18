@@ -37,7 +37,7 @@ export async function repoExists(orgSlug: string, repoName: string): Promise<boo
 
 const POST_RECEIVE_HOOK = [
   "#!/bin/sh",
-  "# FORGE-NEXT post-receive hook - notifies the platform of ref updates.",
+  "# Forge post-receive hook - notifies the platform of ref updates.",
   "# Reads 'old new ref' lines on stdin, POSTs one JSON object per push.",
   'upstream="${FORGE_POST_RECEIVE_URL:-http://127.0.0.1:3000/internal/hooks/post-receive}"',
   'repo_path="$(pwd)"',

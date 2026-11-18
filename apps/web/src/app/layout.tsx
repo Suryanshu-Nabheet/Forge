@@ -6,7 +6,7 @@ import { currentUser } from "@/server/session";
 import { listRepos } from "@/server/api";
 
 export const metadata: Metadata = {
-  title: "FORGE-NEXT",
+  title: "Forge",
   description: "AI-native code collaboration",
 };
 
@@ -39,7 +39,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </header>
           <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">{children}</main>
           <footer className="border-t py-3 text-center text-xs text-[var(--text-faint)]">
-            FORGE-NEXT — intent-first, AI-native code collaboration
+            Forge — intent-first, AI-native code collaboration
           </footer>
         </div>
       </body>

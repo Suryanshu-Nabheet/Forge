@@ -1,4 +1,4 @@
-# TASKS — FORGE-NEXT implementation checklist
+# TASKS — Forge implementation checklist
 
 > Protocol: work top-to-bottom. Tick `[x]` as each item completes. No placeholders in critical paths.
 

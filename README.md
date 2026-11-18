@@ -1,4 +1,4 @@
-# FORGE-NEXT
+# Forge
 
 An AI-native alternative to GitHub: intent-first version control, autonomous PR review, zero-config ephemeral previews, semantic code search, and keyboard-first issue tracking — all running against **real Git** over the smart HTTP protocol.
 
