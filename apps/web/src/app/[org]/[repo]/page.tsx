@@ -1,4 +1,5 @@
-import { findRepo, listBranchesDb, resolveBranchSha, repoTree, repoBlob, repoCommits } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
+import { listBranchesDb, resolveBranchSha, repoTree, repoBlob, repoCommits } from "@/server/api";
 import { repoGitDir } from "@forge/git";
 import Link from "next/link";
 
@@ -12,11 +13,11 @@ interface PageProps {
 export default async function CodePage({ params, searchParams }: PageProps) {
   const { org, repo } = await params;
   const { ref: branchParam, path: pathParam } = await searchParams;
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
   const gitDir = repoGitDir(org, repo);
 
-  const branches = await listBranchesDb(info.id);
+  const branches = await listBranchesDb(info.repoId);
   const branch = branchParam && branches.includes(branchParam) ? branchParam : info.defaultBranch;
   const sha = await resolveBranchSha(gitDir, branch, info.defaultBranch);
   const treePath = pathParam ?? "";

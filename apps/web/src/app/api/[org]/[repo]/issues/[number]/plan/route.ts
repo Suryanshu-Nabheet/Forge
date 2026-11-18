@@ -1,25 +1,19 @@
 // POST /org/repo/issues/:number/plan — enqueue the AI plan-drafting job.
 
 import { NextResponse } from "next/server";
-import { requireUser, unauthorized } from "@/server/session";
+import { requireWritableRepo } from "@/server/authz";
 import { and, eq } from "drizzle-orm";
 import { db, organizations, repositories, intents } from "@forge/db";
 import { enqueue } from "@forge/jobs";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
-  const user = await requireUser();
-  if (!user) return unauthorized();
   const { org, repo, number } = await params;
   const num = Number(number);
 
-  const rows = await db
-    .select({ repoId: repositories.id })
-    .from(repositories)
-    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
-    .where(and(eq(organizations.slug, org), eq(repositories.name, repo)))
-    .limit(1);
-  const r = rows[0];
-  if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404 });
+  const gate = await requireWritableRepo(org, repo);
+  if (!gate.ok) return gate.response;
+  const r = gate.repo;
+  const user = gate.user;
 
   const intentRows = await db
     .select({ id: intents.id })

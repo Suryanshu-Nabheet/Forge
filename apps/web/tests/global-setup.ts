@@ -11,7 +11,7 @@ const DB = process.env.FORGE_TEST_DB ?? "forge_test";
 export async function setup(): Promise<void> {
   // Kill any stale test-server processes squatting the test port.
   try {
-    await exec("bash", ["-c", `lsof -ti:3105,3106 | xargs -r kill -9 || true`]);
+    await exec("bash", ["-c", `lsof -ti:3105,3106,3107 | xargs -r kill -9 || true`]);
   } catch { /* none running */ }
 
   // Create the test database fresh.

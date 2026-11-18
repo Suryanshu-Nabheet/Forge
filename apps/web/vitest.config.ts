@@ -5,7 +5,7 @@ export default defineConfig({
     globalSetup: "./tests/global-setup.ts",
     include: ["tests/**/*.test.ts"],
     testTimeout: 120_000,
-    hookTimeout: 180_000,
+    hookTimeout: 300_000,
     pool: "forks",
     fileParallelism: false,
   },

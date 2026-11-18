@@ -124,6 +124,11 @@ export async function verifyPat(token: string): Promise<{ userId: number; scopes
   return { userId: row.userId, scopes: row.scopes };
 }
 
+export async function revokePat(userId: number, patId: number): Promise<void> {
+  await db.delete(personalAccessTokens)
+    .where(and(eq(personalAccessTokens.id, patId), eq(personalAccessTokens.userId, userId)));
+}
+
 // ---------- ssh keys ----------
 
 export function sshFingerprint(publicKey: string): string {

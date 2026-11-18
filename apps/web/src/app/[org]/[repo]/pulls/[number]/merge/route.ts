@@ -1,7 +1,7 @@
 // POST /org/repo/pulls/:number/merge — merge strategies: merge-commit | squash | rebase.
 
 import { NextResponse } from "next/server";
-import { requireUser, unauthorized } from "@/server/session";
+import { requireWritableRepo } from "@/server/authz";
 import { and, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -14,21 +14,15 @@ import { repoGitDir, revParse } from "@forge/git";
 const exec = promisify(execFile);
 
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
-  const user = await requireUser();
-  if (!user) return unauthorized();
   const { org, repo, number } = await params;
   const num = Number(number);
   const body = (await req.json().catch(() => ({}))) as { strategy?: string };
   const strategy = body.strategy === "squash" || body.strategy === "rebase" ? body.strategy : "merge";
 
-  const rows = await db
-    .select({ repoId: repositories.id, defaultBranch: repositories.defaultBranch })
-    .from(repositories)
-    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
-    .where(and(eq(organizations.slug, org), eq(repositories.name, repo)))
-    .limit(1);
-  const r = rows[0];
-  if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404 });
+  const gate = await requireWritableRepo(org, repo);
+  if (!gate.ok) return gate.response;
+  const r = gate.repo;
+  const user = gate.user;
 
   const prRows = await db.select().from(pullRequests)
     .where(and(eq(pullRequests.repoId, r.repoId), eq(pullRequests.number, num)))

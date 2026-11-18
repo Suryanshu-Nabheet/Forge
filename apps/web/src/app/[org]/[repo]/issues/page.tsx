@@ -1,4 +1,5 @@
-import { findRepo, listIntents } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
+import { listIntents } from "@/server/api";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +14,9 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default async function IssuesPage({ params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const intents = await listIntents(info.id);
+  const intents = await listIntents(info.repoId);
 
   return (
     <div>

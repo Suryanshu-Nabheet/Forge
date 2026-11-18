@@ -28,6 +28,25 @@ export const organizations = pgTable(
   },
 );
 
+export const orgMembers = pgTable(
+  "org_members",
+  {
+    id: serial("id").primaryKey(),
+    orgId: integer("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<"owner" | "member">().notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_members_org_user_idx").on(t.orgId, t.userId),
+    index("org_members_user_idx").on(t.userId),
+  ],
+);
+
 export const repositories = pgTable(
   "repositories",
   {

@@ -3,9 +3,10 @@
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db, organizations, repositories, embeddings } from "@forge/db";
+import { db, repositories, embeddings } from "@forge/db";
 import { answerQuestion } from "@forge/ai";
 import type { EmbeddedChunk } from "@forge/ai";
+import { findVisibleRepo } from "@/server/authz";
 
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
@@ -13,13 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   const question = (body.question ?? "").trim();
   if (!question) return NextResponse.json({ error: "question required" }, { status: 400 });
 
-  const rows = await db
-    .select({ repoId: repositories.id, defaultBranch: repositories.defaultBranch })
-    .from(repositories)
-    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
-    .where(and(eq(organizations.slug, org), eq(repositories.name, repo)))
-    .limit(1);
-  const r = rows[0];
+  const r = await findVisibleRepo(org, repo);
   if (!r) return NextResponse.json({ error: "repo not found" }, { status: 404 });
 
   const branch = body.branch ?? r.defaultBranch;

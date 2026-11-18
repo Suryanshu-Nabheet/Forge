@@ -1,4 +1,5 @@
-import { findRepo, getIntent, intentLinksFor } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
+import { getIntent, intentLinksFor } from "@/server/api";
 import { db, pullRequests } from "@forge/db";
 import { eq } from "drizzle-orm";
 
@@ -7,9 +8,9 @@ export const dynamic = "force-dynamic";
 export default async function IntentPage({ params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
   const { org, repo, number } = await params;
   const num = Number(number);
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const intent = await getIntent(info.id, num);
+  const intent = await getIntent(info.repoId, num);
   if (!intent) return <div className="text-[var(--text-dim)]">Intent #{num} not found</div>;
   const links = await intentLinksFor(intent.id);
   const linkedPrRow = intent.linkedPrId

@@ -3,6 +3,7 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile, access, constants } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 const exec = promisify(execFile);
@@ -39,7 +40,9 @@ const POST_RECEIVE_HOOK = [
   "#!/bin/sh",
   "# Forge post-receive hook - notifies the platform of ref updates.",
   "# Reads 'old new ref' lines on stdin, POSTs one JSON object per push.",
+  "# Authenticated with the shared hook token (FORGE_HOOK_TOKEN) when configured.",
   'upstream="${FORGE_POST_RECEIVE_URL:-http://127.0.0.1:3000/internal/hooks/post-receive}"',
+  'token="${FORGE_HOOK_TOKEN}"',
   'repo_path="$(pwd)"',
   'org_and_repo="${repo_path#*/repos/}"',
   'org="${org_and_repo%%/*}"',
@@ -52,9 +55,21 @@ const POST_RECEIVE_HOOK = [
   'updates="${updates%,}"',
   "",
   "body=\"{\\\"org\\\":\\\"$org\\\",\\\"repo\\\":\\\"$repo\\\",\\\"updates\\\":[$updates]}\"",
-  'curl -s -m 10 -X POST -H "Content-Type: application/json" -d "$body" "$upstream" >/dev/null 2>&1 || true',
+  "if [ -n \"$token\" ]; then",
+  '  curl -s -m 10 -X POST -H "Content-Type: application/json" -H "X-Forge-Hook-Token: $token" -d "$body" "$upstream" >/dev/null 2>&1 || true',
+  "else",
+  '  curl -s -m 10 -X POST -H "Content-Type: application/json" -d "$body" "$upstream" >/dev/null 2>&1 || true',
+  "fi",
   "exit 0",
 ].join("\n") + "\n";
+
+/** Hook token: generated per-process (shared server<->hook via env), or from env. */
+export function hookToken(): string {
+  if (process.env.FORGE_HOOK_TOKEN) return process.env.FORGE_HOOK_TOKEN;
+  const store = globalThis as { __forgeHookToken?: string };
+  if (!store.__forgeHookToken) store.__forgeHookToken = randomBytes(24).toString("hex");
+  return store.__forgeHookToken;
+}
 
 
 /** Create a bare repo with post-receive hook installed. Returns its absolute path. */

@@ -1,4 +1,5 @@
-import { findRepo, getPr, prDiff, prComments, prPreviews, prJobEvents } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
+import { getPr, prDiff, prComments, prPreviews, prJobEvents } from "@/server/api";
 import { repoGitDir } from "@forge/git";
 import { prRiskColor, riskLabel } from "@/components/risk";
 import { PrActions } from "@/components/PrActions";
@@ -9,9 +10,9 @@ export const dynamic = "force-dynamic";
 export default async function PrPage({ params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
   const { org, repo, number } = await params;
   const num = Number(number);
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const pr = await getPr(info.id, num);
+  const pr = await getPr(info.repoId, num);
   if (!pr) return <div className="text-[var(--text-dim)]">PR #{num} not found</div>;
 
   const gitDir = repoGitDir(org, repo);

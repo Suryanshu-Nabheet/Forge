@@ -1,13 +1,14 @@
-import { findRepo, listPrs } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
+import { listPrs } from "@/server/api";
 import { prRiskColor } from "@/components/risk";
 
 export const dynamic = "force-dynamic";
 
 export default async function PullsPage({ params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const prs = await listPrs(info.id);
+  const prs = await listPrs(info.repoId);
   const open = prs.filter((p) => p.status === "open");
   const closed = prs.filter((p) => p.status !== "open");
 

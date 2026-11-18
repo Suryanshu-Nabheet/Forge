@@ -45,6 +45,15 @@ export default function SettingsPage() {
     void refresh();
   }
 
+  async function revoke(kind: "keys" | "pats", id: number) {
+    await fetch(`/api/${kind}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    void refresh();
+  }
+
   return (
     <div className="max-w-2xl space-y-8">
       <section>
@@ -52,9 +61,12 @@ export default function SettingsPage() {
         <div className="card divide-y mb-3">
           {keys.length === 0 && <div className="px-4 py-3 text-[13px] text-[var(--text-dim)]">No SSH keys yet.</div>}
           {keys.map((k) => (
-            <div key={k.id} className="px-4 py-2.5">
-              <div className="text-[13px] font-medium">{k.title}</div>
-              <div className="mono text-xs text-[var(--text-faint)]">{k.fingerprint}</div>
+            <div key={k.id} className="px-4 py-2.5 flex items-center gap-3">
+              <div className="flex-1">
+                <div className="text-[13px] font-medium">{k.title}</div>
+                <div className="mono text-xs text-[var(--text-faint)]">{k.fingerprint}</div>
+              </div>
+              <button className="btn text-xs" onClick={() => void revoke("keys", k.id)}>Remove</button>
             </div>
           ))}
         </div>
@@ -73,6 +85,8 @@ export default function SettingsPage() {
             <div key={p.id} className="px-4 py-2.5 flex items-center gap-3">
               <span className="text-[13px]">{p.name}</span>
               <span className="mono text-xs text-[var(--text-faint)]">{p.prefix}…</span>
+              <span className="flex-1" />
+              <button className="btn text-xs" onClick={() => void revoke("pats", p.id)}>Revoke</button>
             </div>
           ))}
         </div>

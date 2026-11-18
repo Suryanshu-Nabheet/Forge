@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, users, organizations, repositories, intents } from "@forge/db";
+import { db, users, organizations, orgMembers, repositories, intents } from "@forge/db";
 import { hashPassword, createPat } from "@forge/db";
 import { initBareRepo, repoGitDir } from "@forge/git";
 
@@ -35,6 +35,11 @@ async function main() {
   if (!org) {
     [org] = await db.insert(organizations).values({ slug: "acme", name: "ACME Corp", ownerId: ada.id })
       .returning();
+  }
+  // Org membership: ada (owner) + grace (member) — required by the authz layer.
+  for (const [uid, role] of [[ada.id, "owner"] as const, [grace.id, "member"] as const]) {
+    await db.insert(orgMembers).values({ orgId: org.id, userId: uid, role })
+      .onConflictDoNothing();
   }
   let repo = (await db.select().from(repositories)
     .where(and(eq(repositories.orgId, org.id), eq(repositories.name, "iris"))).limit(1))[0];

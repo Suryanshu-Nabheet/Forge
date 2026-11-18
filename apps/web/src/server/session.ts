@@ -3,6 +3,8 @@
 import { cookies } from "next/headers";
 import { userFromSessionToken, type AuthUser } from "@forge/db";
 
+export type { AuthUser };
+
 export async function currentUser(): Promise<AuthUser | null> {
   const jar = await cookies();
   return userFromSessionToken(jar.get("forge_session")?.value ?? null);

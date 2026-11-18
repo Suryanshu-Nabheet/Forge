@@ -6,7 +6,7 @@ import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { and, eq } from "drizzle-orm";
 import { db, verifyPat } from "@forge/db";
-import { organizations, repositories } from "@forge/db";
+import { organizations, repositories, orgMembers } from "@forge/db";
 
 const CANDIDATE_BACKENDS = [
   "/opt/homebrew/opt/git/libexec/git-core/git-http-backend",
@@ -59,6 +59,7 @@ export function parseGitUrl(pathname: string): { orgSlug: string; repoName: stri
 
 interface RepoLookup {
   repoId: number;
+  orgId: number;
   visibility: "public" | "private";
   ownerId: number;
 }
@@ -67,6 +68,7 @@ async function lookupRepo(orgSlug: string, repoName: string): Promise<RepoLookup
   const rows = await db
     .select({
       repoId: repositories.id,
+      orgId: repositories.orgId,
       visibility: repositories.visibility,
       ownerId: organizations.ownerId,
     })
@@ -112,12 +114,25 @@ export async function handleGitRequest(req: IncomingMessage, res: ServerResponse
     return true;
   }
 
-  // Private repos need at least a valid PAT (any user) for MVP.
-  if (repo.visibility === "private" && auth.userId === null) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="forge-git", charset="UTF-8"');
-    res.writeHead(401, { "Content-Type": "text/plain" });
-    res.end("authentication required");
-    return true;
+  // Private repos: PAT holder must be a member of the owning org.
+  if (repo.visibility === "private") {
+    if (auth.userId === null) {
+      res.setHeader("WWW-Authenticate", 'Basic realm="forge-git", charset="UTF-8"');
+      res.writeHead(401, { "Content-Type": "text/plain" });
+      res.end("authentication required");
+      return true;
+    }
+    const member = await db
+      .select({ id: orgMembers.id })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.orgId, repo.orgId), eq(orgMembers.userId, auth.userId)))
+      .limit(1);
+    const isOwner = repo.ownerId === auth.userId;
+    if (member.length === 0 && !isOwner) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("access denied: not a member of this organization");
+      return true;
+    }
   }
 
   await pipeCgi(req, res, parsed, url, auth);

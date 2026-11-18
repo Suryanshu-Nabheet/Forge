@@ -2,9 +2,10 @@
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db, organizations, repositories, users } from "@forge/db";
+import { db, organizations, repositories, orgMembers } from "@forge/db";
 import { initBareRepo } from "@forge/git";
 import { requireUser, unauthorized } from "@/server/session";
+import { roleInOrg } from "@/server/authz";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
@@ -19,10 +20,14 @@ export async function POST(req: Request) {
   if (!SLUG_RE.test(orgSlug)) return NextResponse.json({ error: "invalid org slug" }, { status: 400 });
   if (!SLUG_RE.test(name)) return NextResponse.json({ error: "invalid repo name" }, { status: 400 });
 
-  // Org: reuse or create (owner = first user; single-tenant dev semantics for MVP).
+  // Org: reuse if the caller is a member/owner; otherwise create with caller as owner.
   const existingOrg = (await db.select().from(organizations).where(eq(organizations.slug, orgSlug)).limit(1))[0];
   let orgId: number;
   if (existingOrg) {
+    const role = await roleInOrg(existingOrg.id, user.id);
+    if (role === "none") {
+      return NextResponse.json({ error: "you are not a member of this organization" }, { status: 403 });
+    }
     orgId = existingOrg.id;
   } else {
     const [org] = await db.insert(organizations).values({
@@ -31,6 +36,7 @@ export async function POST(req: Request) {
       ownerId: user.id,
     }).returning({ id: organizations.id });
     orgId = org!.id;
+    await db.insert(orgMembers).values({ orgId, userId: user.id, role: "owner" }).onConflictDoNothing();
   }
 
   const dupe = await db.select({ id: repositories.id }).from(repositories)

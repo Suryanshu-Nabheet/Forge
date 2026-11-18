@@ -19,6 +19,9 @@ async function main() {
   const { handleGitRequest } = await import("./git-transport");
   const { handlePostReceive } = await import("@forge/jobs");
   const { startWorker } = await import("@forge/jobs");
+  const { hookToken } = await import("@forge/git");
+  // Shared secret for hook callbacks: set before repos/handlers read it.
+  process.env.FORGE_HOOK_TOKEN ??= hookToken();
 
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -27,6 +30,13 @@ async function main() {
     try {
       // 1. Internal hook endpoint (post-receive from git bare repos)
       if (req.method === "POST" && pathname === "/internal/hooks/post-receive") {
+        // Authenticated with the shared hook token (constant-time compare).
+        const presented = String(req.headers["x-forge-hook-token"] ?? "");
+        if (presented !== process.env.FORGE_HOOK_TOKEN) {
+          res.writeHead(403, { "Content-Type": "text/plain" });
+          res.end("invalid hook token");
+          return;
+        }
         const body = await readBody(req);
         const result = await handlePostReceive(JSON.parse(body));
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -40,8 +50,14 @@ async function main() {
         if (handled) return;
       }
 
-      // 3. SSE stream for job logs / PR page live updates
+      // 3. SSE stream for job logs / PR page live updates (auth required)
       if (pathname.startsWith("/api/sse/")) {
+        const allowed = await authorizeSse(req, pathname);
+        if (!allowed) {
+          res.writeHead(401, { "Content-Type": "text/plain" });
+          res.end("authentication required");
+          return;
+        }
         await handleSse(req, res, pathname);
         return;
       }
@@ -97,6 +113,41 @@ export function ssePublish(channel: string, event: string, data: unknown): void 
   for (const res of clients) {
     res.write(frame);
   }
+}
+
+/** SSE auth: session cookie required; PR channels also verify repo read access. */
+async function authorizeSse(req: import("node:http").IncomingMessage, pathname: string): Promise<boolean> {
+  const { userFromSessionToken } = await import("@forge/db");
+  const { db, pullRequests, repositories, organizations, orgMembers } = await import("@forge/db");
+  const { and, eq } = await import("drizzle-orm");
+
+  // Extract the session cookie from the raw header (no Next context here).
+  const cookieHeader = String(req.headers.cookie ?? "");
+  const match = /(?:^|;\s*)forge_session=([^;]+)/.exec(cookieHeader);
+  if (!match) return false;
+  const user = await userFromSessionToken(decodeURIComponent(match[1]!));
+  if (!user) return false;
+
+  const channel = pathname.replace(/^\/api\/sse\//, "");
+  const prMatch = /^pr-(\d+)$/.exec(channel);
+  if (!prMatch) return true; // authenticated non-PR channels pass
+
+  const prId = Number(prMatch[1]);
+  const rows = await db
+    .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+    .from(pullRequests)
+    .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
+    .where(eq(pullRequests.id, prId))
+    .limit(1);
+  const repo = rows[0];
+  if (!repo) return false;
+  if (repo.visibility === "public") return true;
+  const member = await db
+    .select({ id: orgMembers.id })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, repo.orgId), eq(orgMembers.userId, user.id)))
+    .limit(1);
+  return member.length > 0;
 }
 
 async function handleSse(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, pathname: string) {

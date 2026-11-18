@@ -1,4 +1,4 @@
-import { findRepo } from "@/server/api";
+import { findVisibleRepo } from "@/server/authz";
 
 export default async function RepoLayout({
   children,
@@ -8,7 +8,7 @@ export default async function RepoLayout({
   params: Promise<{ org: string; repo: string }>;
 }) {
   const { org, repo } = await params;
-  const info = await findRepo(org, repo);
+  const info = await findVisibleRepo(org, repo);
   if (!info) {
     return <div className="p-8 text-center text-[var(--text-dim)]">Repository not found: {org}/{repo}</div>;
   }

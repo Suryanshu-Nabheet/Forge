@@ -1,14 +1,27 @@
-// GET/POST /api/search — global semantic search across repos.
+// GET/POST /api/search — global semantic search across repos the caller can read.
 
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-import { db, embeddings, repositories, organizations } from "@forge/db";
+import { eq, inArray, or, and } from "drizzle-orm";
+import { db, embeddings, repositories, organizations, orgMembers } from "@forge/db";
 import { embedLocal, cosine } from "@forge/ai";
+import { currentUser } from "@/server/session";
 
 export async function POST(req: Request) {
+  const user = await currentUser();
   const body = (await req.json()) as { q?: string; repoId?: number };
   const q = (body.q ?? "").trim();
   if (!q) return NextResponse.json({ results: [] });
+
+  // Visible repos: public always; private only orgs the user belongs to.
+  const visFilter = user
+    ? or(
+        eq(repositories.visibility, "public"),
+        inArray(
+          repositories.orgId,
+          db.select({ orgId: orgMembers.orgId }).from(orgMembers).where(eq(orgMembers.userId, user.id)),
+        ),
+      )
+    : eq(repositories.visibility, "public");
 
   const qv = embedLocal(q, null);
   const rows = await db
@@ -27,7 +40,7 @@ export async function POST(req: Request) {
     .from(embeddings)
     .innerJoin(repositories, eq(repositories.id, embeddings.repoId))
     .innerJoin(organizations, eq(organizations.id, repositories.orgId))
-    .where(body.repoId ? and(eq(embeddings.repoId, body.repoId)) : undefined)
+    .where(body.repoId ? and(eq(embeddings.repoId, body.repoId), visFilter) : visFilter)
     .limit(20000);
 
   const scored = rows

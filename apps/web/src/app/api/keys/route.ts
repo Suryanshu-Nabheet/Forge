@@ -1,7 +1,7 @@
 // GET/POST /api/keys — SSH key management (session-scoped).
 
 import { NextResponse } from "next/server";
-import { listSshKeys, addSshKey } from "@forge/db";
+import { listSshKeys, addSshKey, deleteSshKey } from "@forge/db";
 import { requireUser, unauthorized } from "@/server/session";
 
 export async function GET() {
@@ -21,5 +21,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "not a valid SSH public key" }, { status: 400 });
   }
   await addSshKey(user.id, body.title?.trim() || "untitled", key);
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(req: Request) {
+  const user = await requireUser();
+  if (!user) return unauthorized();
+  const body = (await req.json().catch(() => ({}))) as { id?: number };
+  if (!body.id || !Number.isInteger(body.id)) {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+  await deleteSshKey(user.id, body.id);
   return NextResponse.json({ ok: true });
 }
