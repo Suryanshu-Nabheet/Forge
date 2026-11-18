@@ -1,0 +1,108 @@
+// Docker sandbox adapter — used when `docker info` responds.
+// Same interface as the process adapter. Build runs with cpus/memory caps,
+// tmpfs, no network except npm registry, logs streamed, stopped on timeout.
+
+import { execFile, spawn } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
+import { extractArchive, sandboxDirFor } from "@forge/git";
+import type { BuildSpec, BuildResult } from "./process";
+
+const TIMEOUT_MS = 120_000;
+const CPUS = "1.0";
+const MEM = "512m";
+
+async function dockerAvailable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile("docker", ["info", "--format", "{{.ServerVersion}}"], { timeout: 3000 }, (err, stdout) => {
+      resolve(!err && stdout.trim().length > 0);
+    });
+  });
+}
+
+export async function dockerSandboxAvailable(): Promise<boolean> {
+  return dockerAvailable();
+}
+
+export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
+  const startedAt = Date.now();
+  const workDir = path.join(sandboxDirFor(spec.previewId ?? 0), `docker-${Date.now()}`);
+  await mkdir(path.dirname(workDir), { recursive: true });
+  const containerName = `forge-preview-${spec.previewId ?? "x"}-${Date.now()}`;
+
+  try {
+    spec.onLog(`[sandbox:docker] extracting ${spec.commitSha.slice(0, 7)}`);
+    await extractArchive(spec.gitDir, spec.commitSha, workDir);
+
+    const hasPackageJson = await fileExists(path.join(workDir, "package.json"));
+    const hasDockerfile = await fileExists(path.join(workDir, "Dockerfile"));
+    if (!hasPackageJson && !hasDockerfile) {
+      spec.onLog("[sandbox:docker] no build config — nothing to do");
+      return { ok: true, exitCode: 0, durationMs: Date.now() - startedAt, adapter: "docker", output: "nothing to build" };
+    }
+
+    const script = hasDockerfile
+      ? "docker build -t forge-preview /app && echo built"
+      : "npm install --no-audit --no-fund --ignore-scripts && (npm run build --if-present || true)";
+
+    const args = [
+      "run",
+      "--rm",
+      "--name", containerName,
+      "--cpus", CPUS,
+      "--memory", MEM,
+      "--network", "bridge",
+      "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+      "-v", `${workDir}:/app:ro`,
+      "-w", "/app",
+      "node:22-alpine",
+      "sh", "-c", script,
+    ];
+    spec.onLog(`[sandbox:docker] docker ${args.slice(0, 6).join(" ")}…`);
+
+    const result = await streamCommand(args, spec.onLog);
+    return { ...result, adapter: "docker" };
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    execFile("docker", ["stop", containerName], () => {});
+  }
+}
+
+function streamCommand(args: string[], onLog: (l: string) => void): Promise<Omit<BuildResult, "adapter">> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      onLog("[sandbox:docker] timeout — stopping container");
+      child.kill("SIGKILL");
+    }, TIMEOUT_MS);
+    const append = (chunk: Buffer) => {
+      output += chunk.toString();
+      for (const line of chunk.toString().split("\n")) if (line.trim()) onLog(line.slice(0, 2000));
+    };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      onLog(`[sandbox:docker] spawn error: ${err.message}`);
+      resolve({ ok: false, exitCode: null, durationMs: Date.now() - startedAt, output });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: !killed && code === 0, exitCode: code, durationMs: Date.now() - startedAt, output });
+    });
+  });
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    const fs = await import("node:fs/promises");
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}

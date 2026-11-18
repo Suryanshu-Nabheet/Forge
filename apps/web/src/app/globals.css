@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0b0d10;
+  --bg-raised: #11141a;
+  --bg-hover: #171b23;
+  --border: #232936;
+  --border-strong: #2e3546;
+  --text: #e6e9ef;
+  --text-dim: #9aa3b2;
+  --text-faint: #5c6675;
+  --accent: #6ea8fe;
+  --accent-dim: #3d5a8a;
+  --green: #4ade80;
+  --yellow: #facc15;
+  --red: #f87171;
+  --purple: #c084fc;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    --bg: #ffffff;
+    --bg-raised: #f6f7f9;
+    --bg-hover: #eef0f4;
+    --border: #e2e5ea;
+    --border-strong: #cdd2da;
+    --text: #16181d;
+    --text-dim: #565d6b;
+    --text-faint: #8a919e;
+  }
+}
+
+html.dark {
+  /* dark-mode-first: the dark palette is the default; this class is a no-op hook */
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+/* scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* utility classes used across the app */
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0d10;
+  font-weight: 600;
+}
+.btn-primary:hover { filter: brightness(1.08); background: var(--accent); }
+.input {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+}
+.input:focus { border-color: var(--accent); }
+.mono { font-family: var(--font-mono); }

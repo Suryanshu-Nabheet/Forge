@@ -1,0 +1,29 @@
+{
+  "name": "forge-next",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "db:push": "pnpm --filter @forge/web exec drizzle-kit push",
+    "db:migrate": "pnpm --filter @forge/web exec drizzle-kit migrate",
+    "seed": "pnpm --filter @forge/web exec tsx scripts/seed.ts",
+    "worker": "pnpm --filter @forge/worker dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.8",
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}
