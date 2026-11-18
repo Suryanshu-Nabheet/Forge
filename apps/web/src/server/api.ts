@@ -6,7 +6,7 @@ import { db } from "@forge/db";
 import {
   users, organizations, repositories, branches, commits,
   pullRequests, reviewComments, intents, intentLinks, activities,
-  jobRuns, jobEvents, previews,
+  jobRuns, jobEvents, previews, prApprovals,
 } from "@forge/db";
 import type {
   RepoSummary, PrSummary, IntentSummary, DiffFile, CommitInfo, TreeEntry,
@@ -152,6 +152,15 @@ export async function prDiff(gitDir: string, baseSha: string | null, headSha: st
 
 export async function prComments(prId: number) {
   return db.select().from(reviewComments).where(eq(reviewComments.prId, prId)).orderBy(reviewComments.id);
+}
+
+export async function listApprovals(prId: number): Promise<Array<{ state: string; by: string }>> {
+  return db
+    .select({ state: prApprovals.state, by: users.name })
+    .from(prApprovals)
+    .innerJoin(users, eq(users.id, prApprovals.userId))
+    .where(eq(prApprovals.prId, prId))
+    .orderBy(desc(prApprovals.createdAt));
 }
 
 export async function prPreviews(prId: number) {

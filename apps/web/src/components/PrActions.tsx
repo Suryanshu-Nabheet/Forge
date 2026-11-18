@@ -5,8 +5,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function PrActions({ org, repo, number, status }: {
-  org: string; repo: string; number: number; status: "open" | "merged" | "closed";
+export function PrActions({ org, repo, number, status, approvals }: {
+  org: string; repo: string; number: number;
+  status: "open" | "merged" | "closed";
+  approvals: Array<{ state: string; by: string }>;
 }) {
   const router = useRouter();
   const [strategy, setStrategy] = useState<"merge" | "squash" | "rebase">("squash");
@@ -56,9 +58,37 @@ export function PrActions({ org, repo, number, status }: {
     finally { setBusy(null); }
   }
 
+  async function review(state: "approved" | "changes_requested" | "revoke") {
+    setBusy(`review-${state}`); setError(null);
+    try {
+      await post(`/api/${org}/${repo}/pulls/${number}/approvals`, { state });
+      router.refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
+  }
+
+  const canReview = status === "open";
+
   return (
     <div className="card p-4 space-y-3">
       {error && <div className="text-[13px] text-[var(--red)]">{error}</div>}
+
+      {approvals.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {approvals.map((a, i) => (
+            <span
+              key={i}
+              className={`text-xs border rounded-full px-2 py-0.5 ${
+                a.state === "approved"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-[var(--red)] text-[var(--red)]"
+              }`}
+            >
+              {a.state === "approved" ? "✓" : "⚠"} {a.by}
+            </span>
+          ))}
+        </div>
+      )}
 
       {status === "open" ? (
         <div className="flex items-center gap-2 flex-wrap">
@@ -79,6 +109,26 @@ export function PrActions({ org, repo, number, status }: {
             {busy === "close" ? "Closing…" : "Close"}
           </button>
           <span className="flex-1" />
+          {canReview && (
+            <>
+              <button
+                className="btn"
+                title="Approve this pull request"
+                disabled={busy !== null}
+                onClick={() => review("approved")}
+              >
+                {busy === "review-approved" ? "…" : "Approve"}
+              </button>
+              <button
+                className="btn"
+                title="Request changes"
+                disabled={busy !== null}
+                onClick={() => review("changes_requested")}
+              >
+                {busy === "review-changes_requested" ? "…" : "Request changes"}
+              </button>
+            </>
+          )}
           <button className="btn" onClick={() => setShowComment((v) => !v)}>Comment</button>
         </div>
       ) : (

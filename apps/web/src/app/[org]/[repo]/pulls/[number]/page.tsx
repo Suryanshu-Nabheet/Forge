@@ -1,5 +1,5 @@
 import { findVisibleRepo } from "@/server/authz";
-import { getPr, prDiff, prComments, prPreviews, prJobEvents } from "@/server/api";
+import { getPr, prDiff, prComments, prPreviews, prJobEvents, listApprovals } from "@/server/api";
 import { repoGitDir } from "@forge/git";
 import { prRiskColor, riskLabel } from "@/components/risk";
 import { PrActions } from "@/components/PrActions";
@@ -16,11 +16,12 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
   if (!pr) return <div className="text-[var(--text-dim)]">PR #{num} not found</div>;
 
   const gitDir = repoGitDir(org, repo);
-  const [diff, comments, previews, jobEvents] = await Promise.all([
+  const [diff, comments, previews, jobEvents, approvals] = await Promise.all([
     prDiff(gitDir, pr.baseSha, pr.headSha),
     prComments(pr.id),
     prPreviews(pr.id),
     prJobEvents(pr.id),
+    listApprovals(pr.id),
   ]);
 
   const aiComments = comments.filter((c) => c.kind === "ai_review");
@@ -68,7 +69,7 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
       )}
 
       {/* Actions */}
-      <PrActions org={org} repo={repo} number={pr.number} status={pr.status} />
+      <PrActions org={org} repo={repo} number={pr.number} status={pr.status} approvals={approvals} />
 
       {/* Diff */}
       <div className="space-y-4">
