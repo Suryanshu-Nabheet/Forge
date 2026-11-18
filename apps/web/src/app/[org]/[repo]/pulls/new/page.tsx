@@ -39,7 +39,7 @@ export default function NewPullPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/${orgSlug}/${repoName}/pulls/new`, {
+      const res = await fetch(`/api/${orgSlug}/${repoName}/pulls/new`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, head, base, description }),

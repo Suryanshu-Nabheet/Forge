@@ -60,6 +60,11 @@ beforeAll(async () => {
     env: { ...process.env, DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` },
   });
 
+  // Wipe the storage root too: a stale bare repo survives DB resets and
+  // causes non-fast-forward push failures on re-runs.
+  const fs = await import("node:fs/promises");
+  await fs.rm(DATA, { recursive: true, force: true }).catch(() => {});
+
   await db.connect();
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,

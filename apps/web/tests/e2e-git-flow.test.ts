@@ -63,6 +63,9 @@ async function git(args: string[], opts?: { cwd?: string }) {
 }
 
 beforeAll(async () => {
+  // Wipe storage root first: stale bare repos outlive DB resets and
+  // break pushes with non-fast-forward on re-runs.
+  await rm(DATA, { recursive: true, force: true }).catch(() => {});
   await db.connect();
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,
@@ -193,7 +196,7 @@ describe("git over HTTP", () => {
     await git(["push", "-q", `http://ada:${pat}@localhost:${PORT}/git/acme2/fresh.git`, "HEAD:feature-plain"], { cwd: freshDir });
 
     // Open a manual PR via the new endpoint (session-authenticated).
-    const res = await sfetch(`/acme2/fresh/pulls/new`, {
+    const res = await sfetch(`/api/acme2/fresh/pulls/new`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ head: "feature-plain", base: "main", title: "Plain feature" }),
@@ -203,7 +206,7 @@ describe("git over HTTP", () => {
     expect(data.number).toBeGreaterThan(1);
 
     // Duplicate open is rejected with 409.
-    const dupe = await sfetch(`/acme2/fresh/pulls/new`, {
+    const dupe = await sfetch(`/api/acme2/fresh/pulls/new`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ head: "feature-plain", base: "main" }),
@@ -216,7 +219,7 @@ describe("git over HTTP", () => {
   });
 
   it("rejects a manual PR with no diff (head == base)", async () => {
-    const res = await sfetch(`/acme2/fresh/pulls/new`, {
+    const res = await sfetch(`/api/acme2/fresh/pulls/new`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ head: "main", base: "main" }),
