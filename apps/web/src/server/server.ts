@@ -23,6 +23,34 @@ async function main() {
   // Shared secret for hook callbacks: set before repos/handlers read it.
   process.env.FORGE_HOOK_TOKEN ??= hookToken();
 
+  // Repair pass: existing bare repos may predate the current hook
+  // scripts (e.g. pre-token post-receive hooks → their callbacks get
+  // 403'd and pushes silently lose DB sync). Reinstall hooks for every
+  // repo row at boot; also ensure the protection config exists.
+  void (async () => {
+    try {
+      const { db, repositories, organizations } = await import("@forge/db");
+      const { installHooks, repoGitDir, setProtectedBranches } = await import("@forge/git");
+      const { and, eq } = await import("drizzle-orm");
+      const rows = await db
+        .select({ orgSlug: organizations.slug, name: repositories.name, protectedBranches: repositories.protectedBranches })
+        .from(repositories)
+        .innerJoin(organizations, eq(organizations.id, repositories.orgId));
+      for (const r of rows) {
+        try {
+          const gitDir = repoGitDir(r.orgSlug, r.name);
+          await installHooks(gitDir);
+          await setProtectedBranches(gitDir, r.protectedBranches ?? ["main"]);
+        } catch (err) {
+          console.error(`[forge] hook repair failed for ${r.orgSlug}/${r.name}:`, err);
+        }
+      }
+      if (rows.length > 0) console.log(`[forge] hook repair pass complete for ${rows.length} repos`);
+    } catch (err) {
+      console.error("[forge] hook repair pass failed:", err);
+    }
+  })();
+
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const pathname = url.pathname;

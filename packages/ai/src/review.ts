@@ -161,7 +161,7 @@ export function heuristicReview(diff: DiffFile[]): ReviewAnalysis {
       severity: "warning",
       category: "tests",
       title: "No test coverage for changed file",
-      detail: `The diff changes \`${path}\` but no test file in this diff covers it. The autonomous reviewer can generate one — reply "generate tests" below.`,
+      detail: `The diff changes \`${path}\` but no test file in this diff covers it. Consider adding tests for the changed behavior.`,
     });
     break; // one aggregate finding is enough for the missing-tests signal
   }

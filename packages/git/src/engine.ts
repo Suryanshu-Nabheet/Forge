@@ -109,11 +109,16 @@ export async function initBareRepo(orgSlug: string, repoName: string): Promise<s
   const gitDir = repoGitDir(orgSlug, repoName);
   await mkdir(path.dirname(gitDir), { recursive: true });
   await exec("git", ["init", "--bare", "--initial-branch=main", gitDir]);
+  await installHooks(gitDir);
+  return gitDir;
+}
+
+/** (Re)install hook scripts into an existing bare repo. */
+export async function installHooks(gitDir: string): Promise<void> {
   const hookPath = path.join(gitDir, "hooks", "post-receive");
   await writeFile(hookPath, POST_RECEIVE_HOOK, { mode: 0o755 });
   const prePath = path.join(gitDir, "hooks", "pre-receive");
   await writeFile(prePath, PRE_RECEIVE_HOOK, { mode: 0o755 });
-  return gitDir;
 }
 
 /** Sync the protected-branch list into the bare repo's git config. */
