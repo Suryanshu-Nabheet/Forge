@@ -131,3 +131,37 @@ describe("lifecycle-script prescan", () => {
     expect(scanPackageJson("{nope").ok).toBe(true);
   });
 });
+
+// ---------- markdown renderer (no HTML passthrough) ----------
+
+describe("markdown renderer", () => {
+  it("renders bold, code, links as elements; raw HTML stays text", async () => {
+    const React = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const mod = await import("../src/components/Markdown");
+    const html = renderToStaticMarkup(
+      React.createElement(mod.Markdown, {
+        text: "**bold** and `code` and [link](https://example.com)\n<script>alert(1)</script>",
+      }),
+    );
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<code");
+    expect(html).toContain("code</code>");
+    expect(html).toContain('href="https://example.com"');
+    // Raw HTML must NOT become an element — escaped as text.
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("renders fenced code blocks and lists", async () => {
+    const React = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const mod = await import("../src/components/Markdown");
+    const html = renderToStaticMarkup(
+      React.createElement(mod.Markdown, { text: "- one\n- two\n\n```\nconst x = 1;\n```" }),
+    );
+    expect(html).toContain("<ul");
+    expect(html).toContain("<pre");
+    expect(html).toContain("const x = 1;");
+  });
+});

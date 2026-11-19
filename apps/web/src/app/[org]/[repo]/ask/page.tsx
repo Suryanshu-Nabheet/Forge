@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 "use client";
 
 import { useState } from "react";
@@ -57,7 +58,7 @@ export default function AskPage() {
           <div className="text-[11px] uppercase tracking-wide text-[var(--text-faint)] mb-2">
             {answer.mode} mode · confidence {(answer.confidence * 100).toFixed(0)}%
           </div>
-          <div className="text-[13px] whitespace-pre-wrap leading-relaxed">{answer.answer}</div>
+          <Markdown text={answer.answer} className="text-[13px] leading-relaxed" />
           {answer.citations.length > 0 && (
             <div className="mt-4 pt-4 border-t">
               <div className="text-xs uppercase tracking-wide text-[var(--text-faint)] mb-2">Citations</div>

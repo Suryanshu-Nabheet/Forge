@@ -3,6 +3,7 @@ import { getPr, prDiff, prComments, prPreviews, prJobEvents, listApprovals } fro
 import { repoGitDir } from "@forge/git";
 import { prRiskColor, riskLabel } from "@/components/risk";
 import { PrActions } from "@/components/PrActions";
+import { Markdown } from "@/components/Markdown";
 import { LiveLogs } from "@/components/LiveLogs";
 
 export const dynamic = "force-dynamic";
@@ -171,7 +172,7 @@ function HunkBlock({ hunk, fileComments }: {
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text-faint)] mb-1">
                     {c.kind === "ai_review" ? "🤖 autonomous reviewer" : "human"} {c.severity ? `· ${c.severity}` : ""}
                   </div>
-                  <div className="whitespace-pre-wrap" style={{ fontFamily: "inherit" }}>{c.body.replace(/\*\*/g, "")}</div>
+                  <Markdown text={c.body} className="text-[13px] leading-relaxed" />
                 </div>
               ))}
             </td>
