@@ -432,3 +432,48 @@ describe("org member management", () => {
     expect(text).toContain("Repository not found"); // access revoked
   });
 });
+describe("repo deletion", () => {
+  const ada = { cookie: "" };
+  const malloryJar = { cookie: "" };
+
+  beforeAll(async () => {
+    const af = jarFetch(ada);
+    await af("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "ada@sec.dev", password: "longpassword1" }),
+    });
+    const mf = jarFetch(malloryJar);
+    await mf("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "mallory@sec.dev", password: "longpassword1" }),
+    });
+    // A repo to delete.
+    await af("/api/repos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orgSlug: "secorg", name: "doomed", visibility: "public" }),
+    });
+  });
+
+  it("anonymous and non-owner cannot delete", async () => {
+    const anon = await fetch(`${BASE}/api/orgs/secorg/repos/doomed`, { method: "DELETE" });
+    expect(anon.status).toBe(401);
+
+    const member = await jarFetch(malloryJar)("/api/orgs/secorg/repos/doomed", { method: "DELETE" });
+    expect(member.status).toBe(403); // mallory is a member, not owner
+  });
+
+  it("owner deletes; repo, rows, and bare dir are gone", async () => {
+    const res = await jarFetch(ada)("/api/orgs/secorg/repos/doomed", { method: "DELETE" });
+    expect(res.ok).toBe(true);
+
+    const gone = await db.query(`SELECT count(*)::int AS n FROM repositories WHERE name='doomed'`);
+    expect((gone.rows[0] as { n: number }).n).toBe(0);
+
+    const page = await fetch(`${BASE}/secorg/doomed`);
+    const text = await page.text();
+    expect(text).toContain("Repository not found");
+  });
+});

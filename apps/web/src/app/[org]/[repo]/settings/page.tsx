@@ -52,6 +52,19 @@ export default function RepoSettingsPage() {
     return <div className="text-[var(--text-dim)] text-[13px]">{error ?? "loading…"}</div>;
   }
 
+  async function deleteRepo() {
+    if (!confirm(`Delete ${orgSlug}/${repoName} permanently? This removes all code, PRs, issues, and history.`)) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/orgs/${orgSlug}/repos/${repoName}`, { method: "DELETE" });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `failed (${res.status})`);
+      window.location.href = `/${orgSlug}`;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }
+
   return (
     <div className="max-w-xl space-y-6">
       <section>
@@ -77,6 +90,16 @@ export default function RepoSettingsPage() {
             </span>
           </div>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--red)" }}>Danger zone</h2>
+        <p className="text-[13px] text-[var(--text-dim)] mb-3">
+          Deleting a repository erases its git history, pull requests, intents, and index. This cannot be undone.
+        </p>
+        <button className="btn" style={{ borderColor: "var(--red)", color: "var(--red)" }} disabled={busy} onClick={deleteRepo}>
+          Delete this repository
+        </button>
       </section>
     </div>
   );

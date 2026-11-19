@@ -205,7 +205,7 @@ Routes:
 ## 12. Testing & verification
 
 - `pnpm typecheck` — tsc across the monorepo
-- `pnpm test` — 55 Vitest tests across 5 suites, all booting real servers and driving real git where relevant:
+- `pnpm test` — 60 Vitest tests across 5 suites, all booting real servers and driving real git where relevant:
   - **unit-engines**: diff parser (line anchors, add/remove/rename), deterministic heuristic review (secrets/eval/missing tests/risk), local embedder (unit vectors, similarity ordering, determinism), lifecycle-script prescan
   - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox builds (success path streams `npm run build` output; `curl|sh` postinstall is BLOCKED pre-execution), `git archive` extraction fidelity
   - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, manual PR open + duplicate 409 + no-diff 400, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations

@@ -60,7 +60,7 @@ Sign in to the web UI with **ada@acme.dev / password123** (or register your own 
 
 ```bash
 pnpm typecheck        # tsc across all packages + apps
-pnpm test             # 55 tests across 5 suites: engine units (diff parser, heuristic
+pnpm test             # 60 tests across 5 suites: engine units (diff parser, heuristic
                       #  review, embedder, scanner), queue claim semantics, sandbox
                       #  builds (success + malicious-script blocking), auth flows
                       #  (register/login/logout/401s/session scoping), UI rendering
