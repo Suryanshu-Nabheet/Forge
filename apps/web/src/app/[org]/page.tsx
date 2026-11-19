@@ -4,6 +4,9 @@ import { eq } from "drizzle-orm";
 import { db, organizations, repositories } from "@forge/db";
 import { desc, sql } from "drizzle-orm";
 import Link from "next/link";
+import { OrgMembers } from "@/components/OrgMembers";
+import { currentUser } from "@/server/session";
+import { roleInOrg } from "@/server/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +30,9 @@ export default async function OrgPage({ params }: { params: Promise<{ org: strin
     .from(repositories)
     .where(eq(repositories.orgId, org.id))
     .orderBy(desc(repositories.updatedAt));
+
+  const user = await currentUser();
+  const you = user ? await roleInOrg(org.id, user.id) : "none";
 
   return (
     <div>
@@ -59,6 +65,7 @@ export default async function OrgPage({ params }: { params: Promise<{ org: strin
           ))}
         </div>
       )}
+      {you !== "none" && <OrgMembers org={orgSlug} you={you} />}
     </div>
   );
 }

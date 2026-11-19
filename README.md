@@ -10,9 +10,12 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **Intent-first VCs** | Issues/Specs/Intents link to branches, commits, and PRs (`intent_links`). Branches named `i{n}-*` auto-open PRs against intent #n. |
 | **Autonomous PR review** | Every PR push triggers an async worker: security findings (secrets, eval, injection sinks, prototype pollution), logic smells, missing-test detection, and a 0–100 risk score — posted as inline PR comments. Claude API when `ANTHROPIC_API_KEY` is set; a deterministic static analyzer otherwise. |
 | **Manual PRs** | Open a pull request from any head → base pair via the UI/API — the `i{n}-*` intent convention is a convenience, not a requirement. |
-| **Branch protection** | Protected branches (default: `main`) reject force-pushes and deletions at a `pre-receive` hook. Owners manage the list per repo. |
+| **Branch protection** | Protected branches (default: `main`) reject force-pushes and deletions at a `pre-receive` hook. Owners manage the list per repo in the repo Settings tab. |
+| **PR approvals** | Approve / request changes in the PR page. Merging into a protected branch requires ≥1 approval from a non-author and zero outstanding change requests. |
 | **Org membership** | Private repos are readable/writable only by org members and owners, enforced across pages, API routes, git transport, search, and SSE. |
 | **PAT revocation** | Tokens and SSH keys can be revoked from Settings; revoked PATs are rejected immediately. |
+| **Notifications** | Per-user inbox of activity across your orgs with an unread badge; deep links to the PR or intent. |
+| **Login rate limiting** | 5 failed attempts per email+IP per minute → 429 with Retry-After. |
 | **Semantic code search & Q&A** | Pushes trigger indexing: files are chunked (symbol-aware for code, heading-aware for prose) and embedded. `/search` does global semantic search; the repo "Ask AI" page answers natural-language questions with file:line citations. |
 | **Spec-to-PR workflow** | "Draft implementation plan" generates a structured plan (files to create/modify, steps, acceptance criteria). "Create branch scaffold" pushes a spec branch with a committed `docs/intents/*.md`. |
 | **Ephemeral previews** | Every PR push builds in an isolated sandbox — Docker adapter when available, hardened child-process adapter otherwise (sanitized env, 60s timeout, 2MB output cap, concurrency limit, process-group kill, malicious-lifecycle-script prescan). Build logs stream into the PR page. |
@@ -57,7 +60,7 @@ Sign in to the web UI with **ada@acme.dev / password123** (or register your own 
 
 ```bash
 pnpm typecheck        # tsc across all packages + apps
-pnpm test             # 52 tests across 5 suites: engine units (diff parser, heuristic
+pnpm test             # 55 tests across 5 suites: engine units (diff parser, heuristic
                       #  review, embedder, scanner), queue claim semantics, sandbox
                       #  builds (success + malicious-script blocking), auth flows
                       #  (register/login/logout/401s/session scoping), UI rendering

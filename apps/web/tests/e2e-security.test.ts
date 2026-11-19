@@ -333,7 +333,13 @@ describe("branch protection", () => {
 
 describe("login rate limiting", () => {
   it("locks out after 5 failed attempts per email+ip", async () => {
-    const email = "ada@sec.dev";
+    // Dedicated throwaway account so the lock doesn't leak into other suites.
+    const email = "bruteforce@sec.dev";
+    await fetch(`${BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, name: "Brute Forth", handle: "brute", password: "longpassword1" }),
+    });
     for (let i = 0; i < 5; i++) {
       await fetch(`${BASE}/api/auth/login`, {
         method: "POST",
@@ -350,4 +356,79 @@ describe("login rate limiting", () => {
     expect(blocked.headers.get("Retry-After")).toBe("60");
   });
 });
+describe("org member management", () => {
+  const ada = { cookie: "" };
+  const eve = { cookie: "" };
 
+  beforeAll(async () => {
+    // Ada (owner of secorg) signs in; eve registers fresh.
+    const af = jarFetch(ada);
+    await af("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "ada@sec.dev", password: "longpassword1" }),
+    });
+    const ef = jarFetch(eve);
+    await ef("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "eve2@sec.dev", name: "Eve Two", handle: "eve2", password: "longpassword1" }),
+    });
+  });
+
+  it("non-member cannot list members", async () => {
+    const res = await jarFetch(eve)("/api/orgs/secorg/members");
+    expect(res.status).toBe(403);
+  });
+
+  it("owner lists members with roles", async () => {
+    const res = await jarFetch(ada)("/api/orgs/secorg/members");
+    const data = (await res.json()) as { members: Array<{ handle: string; role: string }>; you: string };
+    expect(res.ok).toBe(true);
+    expect(data.you).toBe("owner");
+    expect(data.members.some((m) => m.role === "owner")).toBe(true);
+  });
+
+  it("owner adds eve2; eve2 gains private-repo access", async () => {
+    const add = await jarFetch(ada)("/api/orgs/secorg/members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "eve2" }),
+    });
+    expect(add.ok).toBe(true);
+
+    const page = await jarFetch(eve)("/secorg/secret");
+    expect(page.status).toBe(200);
+  });
+
+  it("non-owner cannot add or remove members", async () => {
+    const add = await jarFetch(eve)("/api/orgs/secorg/members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "mallory" }),
+    });
+    expect(add.status).toBe(403);
+  });
+
+  it("owner cannot be removed; members can", async () => {
+    const owner = (await db.query(`SELECT owner_id FROM organizations WHERE slug='secorg'`)).rows[0] as { owner_id: number };
+    const delOwner = await jarFetch(ada)("/api/orgs/secorg/members", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: owner.owner_id }),
+    });
+    expect(delOwner.status).toBe(400);
+
+    const eve2 = (await db.query(`SELECT id FROM users WHERE handle='eve2'`)).rows[0] as { id: number };
+    const del = await jarFetch(ada)("/api/orgs/secorg/members", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: eve2.id }),
+    });
+    expect(del.ok).toBe(true);
+
+    const page = await jarFetch(eve)("/secorg/secret");
+    const text = await page.text();
+    expect(text).toContain("Repository not found"); // access revoked
+  });
+});
