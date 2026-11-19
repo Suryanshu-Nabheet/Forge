@@ -1,19 +1,17 @@
 // POST /api/auth/login — session login; sets forge_session cookie.
-// Rate limited: 5 failed attempts per email+IP per minute → 429.
+// Rate limited: 5 failed attempts per account per minute → 429.
+// Keyed by email only — X-Forwarded-For is client-controlled unless a
+// trusted proxy overwrites it, and trusting it would let an attacker
+// rotate fake IPs to bypass the limit. Deployments behind a proxy that
+// sanitizes XFF can extend the key with the real client IP.
 
 import { NextResponse } from "next/server";
 import { loginUser, createSession, loginBlocked, recordLoginFailure, clearLoginFailures } from "@forge/db";
 
-function clientIp(req: Request): string {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return "local";
-}
-
 export async function POST(req: Request) {
   const body = (await req.json()) as { email?: string; password?: string };
   const email = (body.email ?? "").trim();
-  const ip = clientIp(req);
+  const ip = "login"; // single bucket; see note above
 
   if (loginBlocked(email, ip)) {
     return NextResponse.json(
