@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@forge/db";
 import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, activities } from "@forge/db";
 import { repoGitDir, listBranches, revParse, revListCommits, commitParents, commitStats, defaultBranch } from "@forge/git";
+import { dispatchWebhookEvent } from "./webhooks";
 
 interface PostReceiveBody {
   org: string;
@@ -31,8 +32,10 @@ export async function handlePostReceive(body: PostReceiveBody): Promise<{ ok: tr
 
     if (branchMatch && u.new !== "0".repeat(40)) {
       const branchName = branchMatch[1]!;
-      await syncBranch(gitDir, repo.repoId, repo.defaultBranch, branchName, u.new);
+      await syncBranch(gitDir, repo.repoId, repo.defaultBranch, branchName, u.new, orgSlug, repoName);
       handled++;
+      // Push webhook: fire-and-forget, never breaks the hook path.
+      void firePushWebhook(repo.repoId, orgSlug, repoName, branchName, u.new, gitDir).catch(() => {});
     } else if (branchMatch && u.new === "0".repeat(40)) {
       await db.delete(branches).where(and(eq(branches.repoId, repo.repoId), eq(branches.name, branchMatch[1]!)));
       handled++;
@@ -49,6 +52,8 @@ async function syncBranch(
   repoDefaultBranch: string,
   branchName: string,
   newSha: string,
+  orgSlug: string,
+  repoName: string,
 ): Promise<void> {
   // 1. upsert branch row
   const existing = await db
@@ -164,6 +169,17 @@ async function syncBranch(
           type: "pr_opened",
           data: { title: it.title, number: prNumber, branch: branchName },
         });
+        // pull_request(opened) webhook — fire-and-forget.
+        void db.select({ visibility: repositories.visibility })
+          .from(repositories)
+          .where(eq(repositories.id, repoId))
+          .limit(1)
+          .then(([row]) => row && dispatchWebhookEvent(repoId, {
+            event: "pull_request",
+            repository: { org: orgSlug, name: repoName, visibility: row.visibility },
+            pullRequest: { number: prNumber, title: it.title, base: repoDefaultBranch, head: branchName, status: "open" },
+          }))
+          .catch(() => {});
       }
 
       // link intent to the pushed commit
@@ -183,4 +199,32 @@ export async function enqueue(queue: string, payload: Record<string, unknown>): 
   const [job] = await db.insert(jobQueue).values({ queue, payload }).returning({ id: jobQueue.id });
   if (!job) throw new Error("enqueue failed");
   return job.id;
+}
+
+/** Push webhook: ship the ref update + up to 20 commit summaries. */
+async function firePushWebhook(
+  repoId: number,
+  orgSlug: string,
+  repoName: string,
+  branch: string,
+  newSha: string,
+  gitDir: string,
+): Promise<void> {
+  const repoRows = await db
+    .select({ visibility: repositories.visibility })
+    .from(repositories)
+    .where(eq(repositories.id, repoId))
+    .limit(1);
+  if (!repoRows[0]) return;
+  let commitSummaries: Array<{ sha: string; message: string; author: string }> = [];
+  try {
+    const raw = await revListCommits(gitDir, newSha, 20);
+    commitSummaries = raw.map((c) => ({ sha: c.sha, message: c.message, author: c.authorName }));
+  } catch { /* empty repo edge */ }
+  await dispatchWebhookEvent(repoId, {
+    event: "push",
+    repository: { org: orgSlug, name: repoName, visibility: repoRows[0].visibility },
+    ref: `refs/heads/${branch}`,
+    commits: commitSummaries,
+  });
 }

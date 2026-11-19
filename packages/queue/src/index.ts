@@ -4,17 +4,19 @@
 import type { JobPayloadMap, JobType } from "@forge/shared";
 
 export type QueueName = JobType;
-export type Handler<T extends JobType> = (payload: JobPayloadMap[T], jobId: number) => Promise<void>;
+export type Handler<T extends keyof JobPayloadMap> = (payload: JobPayloadMap[T], jobId: number) => Promise<void>;
 
 /** Minimal pg client interface so this package stays dependency-light. */
 export interface PgLike {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
 }
 
-export function createQueue(pg: PgLike) {
-  const handlers = new Map<JobType, Handler<JobType>>();
+type QueueKey = keyof JobPayloadMap;
 
-  async function enqueue<T extends JobType>(queue: T, payload: JobPayloadMap[T]): Promise<number> {
+export function createQueue(pg: PgLike) {
+  const handlers = new Map<QueueKey, Handler<QueueKey>>();
+
+  async function enqueue<T extends keyof JobPayloadMap>(queue: T, payload: JobPayloadMap[T]): Promise<number> {
     const res = await pg.query(
       `INSERT INTO job_queue (queue, payload) VALUES ($1, $2) RETURNING id`,
       [queue, JSON.stringify(payload)],
@@ -22,8 +24,8 @@ export function createQueue(pg: PgLike) {
     return res.rows[0].id;
   }
 
-  function register<T extends JobType>(queue: T, handler: Handler<T>): void {
-    handlers.set(queue, handler as Handler<JobType>);
+  function register<T extends QueueKey>(queue: T, handler: Handler<T>): void {
+    handlers.set(queue, handler as Handler<QueueKey>);
   }
 
   /** Claim and run one batch of jobs. Returns how many were claimed. */
@@ -37,7 +39,7 @@ export function createQueue(pg: PgLike) {
       [workerId(), limit],
     );
     for (const row of claimed.rows) {
-      const handler = handlers.get(row.queue as JobType);
+      const handler = handlers.get(row.queue as QueueKey);
       if (!handler) {
         await fail(row.id, `no handler for ${row.queue}`);
         continue;

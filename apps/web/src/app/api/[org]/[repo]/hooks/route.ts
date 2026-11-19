@@ -1,0 +1,96 @@
+// Webhook management API: list / create / delete / ping hooks for a repo.
+
+import { NextResponse } from "next/server";
+import { randomBytes } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { db, webhooks } from "@forge/db";
+import { currentUser } from "@/server/session";
+import { findVisibleRepo, canWriteRepo } from "@/server/authz";
+import { listWebhooks, webhookDeliveries } from "@/server/api";
+import { dispatchWebhookEvent, pingPayload } from "@forge/jobs";
+import type { WebhookEventName } from "@forge/shared";
+
+const VALID_EVENTS = new Set<WebhookEventName>(["push", "pull_request", "pr_merged", "ping"]);
+const URL_RE = /^https?:\/\/.+/;
+
+export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
+  const { org, repo } = await params;
+  const info = await findVisibleRepo(org, repo);
+  if (!info) return NextResponse.json({ error: "repo not found" }, { status: 404 });
+
+  // Write access required even to list: hook URLs + secrets are sensitive.
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "authentication required" }, { status: 401 });
+  if (!(await canWriteRepo(info.orgId, user.id))) {
+    return NextResponse.json({ error: "no write access to this repo" }, { status: 403 });
+  }
+
+  const hooks = await listWebhooks(info.repoId);
+  const withDeliveries = await Promise.all(hooks.map(async (h) => ({
+    ...h,
+    deliveries: await webhookDeliveries(h.id, 10),
+  })));
+  return NextResponse.json({ webhooks: withDeliveries });
+}
+
+export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "authentication required" }, { status: 401 });
+  const { org, repo } = await params;
+  const info = await findVisibleRepo(org, repo);
+  if (!info) return NextResponse.json({ error: "repo not found" }, { status: 404 });
+  if (!(await canWriteRepo(info.orgId, user.id))) {
+    return NextResponse.json({ error: "no write access to this repo" }, { status: 403 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as { url?: string; events?: string[] };
+  const url = (body.url ?? "").trim();
+  if (!URL_RE.test(url) || url.length > 2048) {
+    return NextResponse.json({ error: "url must be a valid http(s) URL" }, { status: 400 });
+  }
+  const events = (body.events ?? ["push"]).filter((e): e is WebhookEventName => VALID_EVENTS.has(e as WebhookEventName));
+  if (events.length === 0) return NextResponse.json({ error: "at least one valid event required" }, { status: 400 });
+
+  const existingCount = await db.select({ id: webhooks.id }).from(webhooks).where(eq(webhooks.repoId, info.repoId));
+  if (existingCount.length >= 20) {
+    return NextResponse.json({ error: "webhook limit (20) reached for this repo" }, { status: 400 });
+  }
+
+  const secret = randomBytes(24).toString("hex");
+  const [row] = await db.insert(webhooks).values({
+    repoId: info.repoId,
+    url,
+    secret,
+    events,
+  }).returning({ id: webhooks.id, url: webhooks.url, events: webhooks.events, active: webhooks.active, createdAt: webhooks.createdAt });
+
+  // Ping the new hook (fire-and-forget; delivery logged in webhook_deliveries).
+  void dispatchWebhookEvent(info.repoId, pingPayload(org, repo, info.visibility)).catch(() => {});
+
+  // SSRF guard: only http(s) allowed (URL_RE); the delivery engine enforces
+  // redirect-follow=0 and a response size cap.
+  return NextResponse.json({
+    id: row!.id,
+    url: row!.url,
+    events: row!.events,
+    active: row!.active,
+    secret, // shown exactly once, like PATs
+    createdAt: row!.createdAt.toISOString(),
+  });
+}
+
+export async function DELETE(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "authentication required" }, { status: 401 });
+  const { org, repo } = await params;
+  const info = await findVisibleRepo(org, repo);
+  if (!info) return NextResponse.json({ error: "repo not found" }, { status: 404 });
+  if (!(await canWriteRepo(info.orgId, user.id))) {
+    return NextResponse.json({ error: "no write access to this repo" }, { status: 403 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as { id?: number };
+  if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  await db.delete(webhooks).where(and(eq(webhooks.id, body.id), eq(webhooks.repoId, info.repoId)));
+  return NextResponse.json({ ok: true });
+}

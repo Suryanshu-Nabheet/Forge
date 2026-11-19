@@ -7,9 +7,11 @@ import {
   users, organizations, repositories, branches, commits,
   pullRequests, reviewComments, intents, intentLinks, activities,
   jobRuns, jobEvents, previews, prApprovals,
+  stars, watchers, forkedRepos, webhooks, webhookDeliveries as webhookDeliveriesTable,
 } from "@forge/db";
 import type {
   RepoSummary, PrSummary, IntentSummary, DiffFile, CommitInfo, TreeEntry,
+  WebhookSummary, WebhookDeliverySummary, WebhookEventName,
 } from "@forge/shared";
 import {
   repoGitDir, lsTree, catFileText, isBinary, revParse, revListCommits,
@@ -247,4 +249,90 @@ export async function intentLinksFor(intentId: number) {
 
 export async function recentActivity(limit = 20) {
   return db.select().from(activities).orderBy(desc(activities.id)).limit(limit);
+}
+
+// ---------- social: stars / watchers / forks ----------
+
+export async function repoSocial(repoId: number, userId: number | null): Promise<{
+  stars: number;
+  watchers: number;
+  forks: number;
+  starred: boolean;
+  watching: boolean;
+}> {
+  const [starCount, watchCount, forkCount] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(stars).where(eq(stars.repoId, repoId)),
+    db.select({ n: sql<number>`count(*)::int` }).from(watchers).where(eq(watchers.repoId, repoId)),
+    db.select({ n: sql<number>`count(*)::int` }).from(forkedRepos).where(eq(forkedRepos.forkedFromRepoId, repoId)),
+  ]);
+  let starred = false;
+  let watching = false;
+  if (userId) {
+    const [s, w] = await Promise.all([
+      db.select({ id: stars.id }).from(stars).where(and(eq(stars.repoId, repoId), eq(stars.userId, userId))).limit(1),
+      db.select({ id: watchers.id }).from(watchers).where(and(eq(watchers.repoId, repoId), eq(watchers.userId, userId))).limit(1),
+    ]);
+    starred = s.length > 0;
+    watching = w.length > 0;
+  }
+  return {
+    stars: Number(starCount[0]?.n ?? 0),
+    watchers: Number(watchCount[0]?.n ?? 0),
+    forks: Number(forkCount[0]?.n ?? 0),
+    starred,
+    watching,
+  };
+}
+
+/** Fork lineage info for a repo: where it forked from (if anywhere). */
+export async function forkParent(repoId: number): Promise<{ orgSlug: string; name: string } | null> {
+  const rows = await db
+    .select({ orgSlug: organizations.slug, name: repositories.name })
+    .from(forkedRepos)
+    .innerJoin(repositories, eq(repositories.id, forkedRepos.forkedFromRepoId))
+    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
+    .where(eq(forkedRepos.repoId, repoId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// ---------- webhooks ----------
+
+export async function listWebhooks(repoId: number): Promise<WebhookSummary[]> {
+  const rows = await db.select().from(webhooks).where(eq(webhooks.repoId, repoId)).orderBy(desc(webhooks.id));
+  return rows.map((w) => ({
+    id: w.id,
+    url: w.url,
+    events: (w.events ?? []) as WebhookEventName[],
+    active: w.active,
+    createdAt: w.createdAt.toISOString(),
+  }));
+}
+
+export async function webhookDeliveries(webhookId: number, limit = 20): Promise<WebhookDeliverySummary[]> {
+  const rows = await db.select().from(webhookDeliveriesTable)
+    .where(eq(webhookDeliveriesTable.webhookId, webhookId))
+    .orderBy(desc(webhookDeliveriesTable.id))
+    .limit(limit);
+  return rows.map((d) => ({
+    id: d.id,
+    webhookId: d.webhookId,
+    event: d.event,
+    status: d.status,
+    responseStatus: d.responseStatus,
+    durationMs: d.durationMs,
+    error: d.error,
+    createdAt: d.createdAt.toISOString(),
+  }));
+}
+
+// ---------- compare ----------
+
+/** Parse a compare range like "base...head" or "base..head" into two revs. */
+export function parseCompareRange(range: string): { base: string; head: string } | null {
+  const three = /^(\S+)\.\.\.(\S+)$/.exec(range);
+  if (three) return { base: three[1]!, head: three[2]! };
+  const two = /^(\S+)\.\.(\S+)$/.exec(range);
+  if (two) return { base: two[1]!, head: two[2]! };
+  return null;
 }

@@ -6,10 +6,13 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 
 | Capability | How it works |
 |---|---|
-| **Real Git hosting** | `git clone`/`push`/`pull` over HTTP via `git http-backend` CGI bridge. Stock git clients work unchanged. |
+| **Real Git hosting** | `git clone`/`push`/`pull` over HTTP via `git http-backend` CGI bridge, **and over SSH** (`ssh://git@host:2222/org/repo.git`) authenticated against your uploaded SSH keys. Stock git clients work unchanged. |
 | **Intent-first VCs** | Issues/Specs/Intents link to branches, commits, and PRs (`intent_links`). Branches named `i{n}-*` auto-open PRs against intent #n. |
 | **Autonomous PR review** | Every PR push triggers an async worker: security findings (secrets, eval, injection sinks, prototype pollution), logic smells, missing-test detection, and a 0–100 risk score — posted as inline PR comments. Claude API when `ANTHROPIC_API_KEY` is set; a deterministic static analyzer otherwise. |
 | **Manual PRs** | Open a pull request from any head → base pair via the UI/API — the `i{n}-*` intent convention is a convenience, not a requirement. |
+| **Commit & compare views** | Per-branch commit history with tags, per-commit diff pages (with parent links), and a branch-compare page (commits + full diff, with one-click "Open pull request"). |
+| **Stars, forks & watchers** | Star/watch any repo (counts on the header, toggles are optimistic); forks mirror the git data into your personal org with lineage tracked and shown on both sides. |
+| **Webhooks** | Per-repo hooks (push, pull_request, pr_merged, ping) with per-hook HMAC-SHA256 secrets, delivery log with status/latency/response codes, and hardening (10s timeout, no redirects, response cap, http(s) only). |
 | **Branch protection** | Protected branches (default: `main`) reject force-pushes and deletions at a `pre-receive` hook. Owners manage the list per repo in the repo Settings tab. |
 | **PR approvals** | Approve / request changes in the PR page. Merging into a protected branch requires ≥1 approval from a non-author and zero outstanding change requests. |
 | **Org membership** | Private repos are readable/writable only by org members and owners, enforced across pages, API routes, git transport, search, and SSE. |
@@ -54,22 +57,24 @@ git push http://ada:<PAT>@localhost:3000/git/acme/iris.git HEAD:i3-admin-revocat
 
 Pushing an `i3-*` branch links to intent #3 and auto-opens a PR; seconds later the autonomous reviewer posts findings (the seeded branch contains a hard-coded token and an `eval()` — watch it get flagged), a preview build runs, and the branch is indexed for search.
 
-Sign in to the web UI with **ada@acme.dev / password123** (or register your own account). All mutations — repo creation, intents, merges, comments, PATs, SSH keys — require a session; git operations use PATs over Basic auth.
+Sign in to the web UI with **ada@acme.dev / password123** (or register your own account). All mutations — repo creation, intents, merges, comments, PATs, SSH keys — require a session; git operations use PATs over Basic auth (HTTP) or uploaded SSH keys (SSH transport, `FORGE_SSH_PORT`, default 2222).
 
 ## Commands
 
 ```bash
 pnpm typecheck        # tsc across all packages + apps
-pnpm test             # 64 tests across 5 suites: engine units (diff parser, heuristic
+pnpm test             # 83 tests across 6 suites: engine units (diff parser, heuristic
                       #  review, embedder, scanner), queue claim semantics, sandbox
                       #  builds (success + malicious-script blocking), auth flows
                       #  (register/login/logout/401s/session scoping), UI rendering
                       #  (dashboard/org/repo/file view), the full E2E git flow
                       #  (clone, PAT push, auto-PR, manual PRs, AI review, preview,
                       #  auth rejection, squash merge, Q&A citations, intent
-                      #  lifecycle), and the security suite (private-repo gating,
+                      #  lifecycle), the security suite (private-repo gating,
                       #  org membership, branch protection, PAT revocation,
-                      #  hook auth, brute-force lockout)
+                      #  hook auth, brute-force lockout), and the new-features suite
+                      #  (star/watch/fork, commit + compare pages, SSH transport
+                      #  clone/push/auth rejection, webhook delivery + HMAC)
 pnpm --filter @forge/web exec next build   # production build
 pnpm worker           # standalone worker process (optional; dev runs one in-process)
 pnpm db:push          # apply Drizzle schema
@@ -83,7 +88,9 @@ Everything optional except Postgres:
 ```bash
 DATABASE_URL=postgresql://user@localhost:5432/forge   # required
 FORGE_STORAGE_ROOT=apps/web/data                     # bare repos + sandboxes
-FORGE_PORT=3000                                      # web + git listen here
+FORGE_PORT=3000                                      # web + git HTTP listen here
+FORGE_SSH_PORT=2222                                  # git-over-SSH port (0 disables)
+FORGE_SSH_HOST_KEY=path/to/key                       # SSH host key (auto-generated ed25519 on first boot)
 ANTHROPIC_API_KEY=...                                # Claude review/QA/plans (else deterministic heuristics)
 FORGE_HOOK_TOKEN=...                                 # shared secret for git hook callbacks (auto-generated)
 ```
@@ -96,8 +103,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md). Monorepo map:
 apps/web        Next.js UI + custom Node server (Next + /git CGI bridge + hooks + SSE + worker)
 apps/worker     standalone worker entry for production splits
 packages/git    bare-repo lifecycle, typed git plumbing, diff parser, archive extraction
-packages/db     Drizzle schema (19 tables), auth (scrypt sessions, PATs, SSH keys, org membership)
-packages/jobs   post-receive handler (ref sync, auto-PR, enqueue) + job processors
+packages/db     Drizzle schema (24 tables), auth (scrypt sessions, PATs, SSH keys, org membership)
+packages/jobs   post-receive handler (ref sync, auto-PR, enqueue) + job processors + webhook delivery
 packages/ai     review engine (Claude + heuristic), embeddings, Q&A, plan generator
 packages/sandbox process + docker preview runners with prescan
 packages/queue  Postgres SKIP-LOCKED queue (reference claim implementation)
@@ -120,3 +127,7 @@ packages/shared domain types shared end-to-end
 - squash merge updates the base branch and marks the PR merged
 - semantic index job chunks+embeds files; Q&A cites the pushed file with line ranges
 - diff parser line-anchor correctness; deterministic heuristic findings; embedder sanity; malicious-install-script blocking
+- star/watch toggles with counts; fork mirrors git data under the forker's personal org with lineage; collision-suffixed fork names
+- commit history page, commit detail diff page, compare page (commits + diff + "open PR" flow)
+- SSH transport: clone + push with a registered key, unknown keys rejected, non-members cannot fetch private repos over SSH
+- webhooks: ping on creation, push/pull_request/pr_merged events delivered with valid HMAC-SHA256 signatures, delivery log recorded, `file://` URLs rejected, deleted hooks stop delivering

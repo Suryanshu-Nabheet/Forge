@@ -3,21 +3,47 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, writeFile, access, constants } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 const exec = promisify(execFile);
 
+/**
+ * Resolve a possibly-relative FORGE_STORAGE_ROOT to an absolute path.
+ * Relative values are interpreted from the repo root when they look like a
+ * monorepo-relative path (starts with "apps/" or "packages/"), else from cwd.
+ * This makes both README conventions work: `FORGE_STORAGE_ROOT=apps/web/data`
+ * from the repo root and `FORGE_STORAGE_ROOT=data` from apps/web land on the
+ * same directory regardless of the process cwd.
+ */
+function resolveStorageRoot(): string {
+  const raw = process.env.FORGE_STORAGE_ROOT ?? "data";
+  const abs = path.resolve(raw);
+  if (path.isAbsolute(raw)) return abs;
+  if (/^(apps|packages)\//.test(raw)) {
+    // Monorepo-rooted: walk up from cwd looking for pnpm-workspace.yaml.
+    let dir = process.cwd();
+    for (let i = 0; i < 6; i++) {
+      if (existsSync(path.join(dir, "pnpm-workspace.yaml"))) {
+        return path.resolve(dir, raw);
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return abs;
+}
+
 /** Where all bare repos live: $FORGE_STORAGE_ROOT/repos (default ./data/repos). */
 export function reposRoot(): string {
-  const base = process.env.FORGE_STORAGE_ROOT ?? path.join(process.cwd(), "data");
-  return path.resolve(base, "repos");
+  return path.join(resolveStorageRoot(), "repos");
 }
 
 /** Where sandbox checkouts live: $FORGE_STORAGE_ROOT/sandboxes. */
 export function sandboxesRoot(): string {
-  const base = process.env.FORGE_STORAGE_ROOT ?? path.join(process.cwd(), "data");
-  return path.resolve(base, "sandboxes");
+  return path.join(resolveStorageRoot(), "sandboxes");
 }
 
 export function repoGitDir(orgSlug: string, repoName: string): string {

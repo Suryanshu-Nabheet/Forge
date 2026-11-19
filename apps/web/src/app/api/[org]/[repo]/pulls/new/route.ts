@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db, pullRequests, activities } from "@forge/db";
 import { requireWritableRepo, findVisibleRepo } from "@/server/authz";
 import { repoGitDir, revParse, listBranches } from "@forge/git";
+import { dispatchWebhookEvent } from "@forge/jobs";
 
 // GET: list branches for the new-PR form.
 export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
@@ -108,6 +109,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     type: "pr_opened",
     data: { title, number: pr.number, branch: head },
   });
+
+  // pull_request(opened) webhook — fire-and-forget.
+  void dispatchWebhookEvent(r.repoId, {
+    event: "pull_request",
+    repository: { org, name: repo, visibility: r.visibility },
+    sender: { handle: user.handle, name: user.name },
+    pullRequest: { number: pr.number, title: title || `Merge ${head} into ${base}`, base, head, status: "open" },
+  }).catch(() => {});
 
   // Enqueue review + preview like the intent auto-PR path does.
   const { enqueue } = await import("@forge/jobs");

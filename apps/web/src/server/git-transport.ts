@@ -149,11 +149,12 @@ async function pipeCgi(
 ): Promise<void> {
   // http-backend resolves repos as GIT_PROJECT_ROOT + PATH_INFO — so the
   // project root is the parent repos dir, and PATH_INFO carries org/repo.git.
-  const storageRoot = path.resolve(process.env.FORGE_STORAGE_ROOT ?? "data");
-  const gitDir = path.join(storageRoot, "repos", parsed.orgSlug, `${parsed.repoName}.git`);
+  const { reposRoot } = await import("@forge/git");
+  const reposDir = reposRoot();
+  const gitDir = path.join(reposDir, parsed.orgSlug, `${parsed.repoName}.git`);
   const env = {
     ...process.env,
-    GIT_PROJECT_ROOT: path.join(storageRoot, "repos"),
+    GIT_PROJECT_ROOT: reposDir,
     GIT_HTTP_EXPORT_ALL: "1",
     REQUEST_METHOD: req.method ?? "GET",
     PATH_INFO: `/${parsed.orgSlug}/${parsed.repoName}.git${parsed.rest}`,

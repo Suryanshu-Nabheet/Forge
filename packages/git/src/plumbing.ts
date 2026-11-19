@@ -167,6 +167,34 @@ export async function commitInfo(gitDir: string, sha: string): Promise<CommitInf
   }
 }
 
+/** True if `ancestor` is reachable from `descendant` (merge-base --is-ancestor). */
+export async function isAncestor(gitDir: string, ancestor: string, descendant: string): Promise<boolean> {
+  try {
+    await gitIn(gitDir, ["merge-base", "--is-ancestor", ancestor, descendant], { maxBuffer: 1024 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** List tags (name + sha), newest first. */
+export async function listTags(gitDir: string): Promise<Array<{ name: string; sha: string }>> {
+  try {
+    const out = await gitIn(gitDir, ["for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%x1f%(objectname)", "refs/tags"]);
+    return out
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const [name, sha] = l.split("\x1f");
+        return { name: name ?? "", sha: sha ?? "" };
+      })
+      .filter((t) => t.name && t.sha);
+  } catch {
+    return [];
+  }
+}
+
 /** Commit stats (additions/deletions) from numstat. */
 export async function commitStats(gitDir: string, sha: string): Promise<{ additions: number; deletions: number }> {
   try {

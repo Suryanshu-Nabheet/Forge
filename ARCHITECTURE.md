@@ -33,6 +33,7 @@ origin/                         # repo root, pnpm workspace + turborepo
 │   │   │   ├── env.ts          # zod-validated env
 │   │   │   ├── trpc.ts         # tRPC setup + routers
 │   │   │   ├── git-transport.ts# git http-backend CGI bridge + auth
+│   │   │   ├── ssh-server.ts   # git-over-SSH transport (ssh2, key auth)
 │   │   │   ├── server.ts       # custom Node http server (Next + /git + /trpc)
 │   │   │   └── hooks/          # post-receive hook handler
 │   │   ├── src/components/      # UI: file tree, diff viewer, palette, etc.
@@ -91,6 +92,19 @@ client (git CLI)                     apps/web custom server
     │                                 → update DB refs, enqueue index + AI jobs
 ```
 
+### 3.1b Git over SSH (`FORGE_SSH_PORT`, default 2222; 0 disables)
+
+A second listener (`ssh-server.ts`, `ssh2` server) speaks the standard git-over-SSH
+convention: the client sends `git-upload-pack '/org/repo.git'` (or `git-receive-pack`)
+as an exec request. Auth is public-key only: the presented key blob must byte-match a
+stored `ssh_keys` row (identity → user), and the SSH signature is verified against the
+session blob. ACL mirrors HTTP: fetch = public-or-member, push = member. The request is
+piped to the real `git-upload-pack`/`git-receive-pack` with the bare repo as cwd, so the
+same `pre-receive`/`post-receive` hook chain fires (branch protection, DB sync, auto-PR,
+webhooks). Git protocol v2 is negotiated via the `SendEnv=GIT_PROTOCOL` session env.
+The SSH host key (ed25519) is generated with `ssh-keygen` on first boot into
+`$FORGE_STORAGE_ROOT/ssh_host_ed25519_key` (override with `FORGE_SSH_HOST_KEY`).
+
 ### 3.2 Node CGI bridging notes
 
 `git-http-backend` reads HTTP request metadata from **environment variables** (`REQUEST_METHOD`, `PATH_INFO`, `QUERY_STRING`, `CONTENT_TYPE`, `CONTENT_LENGTH`, `GIT_PROJECT_ROOT`, `GIT_HTTP_EXPORT_ALL`) and the request body from stdin; it writes a CGI response (headers, then body) to stdout. Our bridge:
@@ -128,6 +142,11 @@ The post-receive handler then:
 | `job_events` | streamed job logs | jobId, level, message, createdAt |
 | `previews` | ephemeral environments | repoId, prId, branch, commitSha, status, buildLogId, containerName, url |
 | `activities` | activity feed | repoId, userId, type, data |
+| `stars` | repo stars | repoId, userId (unique pair) |
+| `watchers` | repo watchers | repoId, userId (unique pair) |
+| `forked_repos` | fork lineage | repoId (unique), forkedFromRepoId |
+| `webhooks` | per-repo hooks | repoId, url, secret, events jsonb, active |
+| `webhook_deliveries` | delivery log | webhookId, event, status, responseStatus, durationMs, payload |
 
 ### 4.1 Vectors without pgvector
 
@@ -159,6 +178,16 @@ Postgres-backed queue: `job_queue` table, atomic claim via a single `UPDATE … 
 
 Job types: `semantic_index`, `pr_review`, `qa_answer`, `intent_plan`, `preview_build`. Every job writes log lines to `job_events` (streamed to the UI over SSE) and a `job_runs` row for status.
 
+## 6b. Webhooks (`packages/jobs/src/webhooks.ts`)
+
+Per-repo hooks (`webhooks` table) receive events on push (from the post-receive handler),
+pull_request open (auto + manual), pr_merged (from the merge route), and ping (on hook
+creation). Delivery: POST the JSON payload with `X-Forge-Event`, `X-Forge-Delivery`, and
+`X-Forge-Signature: sha256=<HMAC-SHA256(secret, body)>` headers. Hardened: http(s) URLs
+only, no redirect-following, 10s timeout, 64KB response drain cap. Every attempt is a
+`webhook_deliveries` row (status, responseStatus, durationMs, error). Delivery failures
+never throw into the caller — pushes and merges complete regardless.
+
 ## 7. Ephemeral sandbox runner (`packages/sandbox`)
 
 Every PR push triggers a preview build. Adapters, feature-detected at runtime:
@@ -170,7 +199,7 @@ Every PR push triggers a preview build. Adapters, feature-detected at runtime:
 
 - Hand-rolled, dependency-light auth (deliberate: small auditable surface): scrypt password hashing, DB-backed sessions, `forge_session` httpOnly cookie.
 - **PATs**: generated in the UI, shown once, stored sha256-hashed. Git uses `http://user:token@host/git/…` (Basic); the API accepts `Authorization: Bearer <pat>`. Scopes: `repo:read`, `repo:write`.
-- **SSH keys**: managed + revocable in UI (title, fingerprint, publicKey) — stored for future SSH transport; HTTP with PATs is the current transport.
+- **SSH keys**: managed + revocable in UI (title, fingerprint, publicKey) — these authenticate the SSH git transport (public-key blob match + signature verification); HTTP with PATs is the other transport.
 
 ## 9. UI structure (Next.js App Router)
 
@@ -180,12 +209,18 @@ Routes:
 - `/` — dashboard (repos, activity, open PRs)
 - `/login` — sign in
 - `/[org]/[repo]` — code: file tree, syntax-highlighted viewer, branch switcher, commit history
+- `/[org]/[repo]/commits` and `/commits/[sha]` — branch commit history (with tags) and per-commit diff pages
+- `/[org]/[repo]/compare` — branch × branch compare: commit list + full diff + "open PR"
 - `/[org]/[repo]/pulls` and `/pulls/[number]` — diff viewer, inline comments (human + AI), merge strategies (merge/rebase/squash), preview card + live build logs, risk card
 - `/[org]/[repo]/issues` and `/issues/[number]` — intent board, keyboard nav, statuses, AI plan
 - `/[org]/[repo]/ask` — semantic codebase Q&A
 - `/search` — global semantic search
 - `/settings` — SSH keys + PATs
 - `/new` — new repo
+
+Repo header: star / watch / fork buttons (optimistic counts), fork lineage shown on
+both fork and source. Repo settings: branch protection + webhooks panel (create with
+secret shown once, delivery log, delete).
 
 ## 10. Migrations & running
 
@@ -205,10 +240,11 @@ Routes:
 ## 12. Testing & verification
 
 - `pnpm typecheck` — tsc across the monorepo
-- `pnpm test` — 64 Vitest tests across 5 suites, all booting real servers and driving real git where relevant:
+- `pnpm test` — 83 Vitest tests across 6 suites, all booting real servers and driving real git where relevant:
   - **unit-engines**: diff parser (line anchors, add/remove/rename), deterministic heuristic review (secrets/eval/missing tests/risk), local embedder (unit vectors, similarity ordering, determinism), lifecycle-script prescan
   - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox builds (success path streams `npm run build` output; `curl|sh` postinstall is BLOCKED pre-execution), `git archive` extraction fidelity
   - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, manual PR open + duplicate 409 + no-diff 400, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations
   - **e2e-auth-issues**: anonymous 401s, register/login/logout, weak-password rejection, session-scoped keys/PATs, UI page rendering (dashboard/org/repo/file view), PR close/reopen → intent status sync, human comments, merge → intent done
   - **e2e-security**: private-repo page gating (anon + non-member), search leakage, org takeover 403, forged hook-token 403, SSE session required, PAT create→use→revoke→rejected, SSH key delete, member promotion grants access, branch protection (force-push/deletion rejected, unprotected allowed, owner settings API), login brute-force lockout (429 + Retry-After)
+  - **e2e-new-features**: star/watch toggles + counts + 401s, fork mirrors git data with lineage + collision suffixing, commits list/detail/compare pages, SSH transport (clone, push→DB sync, unknown-key rejection, private-repo ACL), webhooks (ping/push HMAC signatures, delivery log, non-http rejection, delete stops delivery)
 - `pnpm typecheck` / `pnpm test` / `pnpm build` — quality gates before "done" (no ESLint config yet)

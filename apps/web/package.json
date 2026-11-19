@@ -14,14 +14,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
     "@forge/ai": "workspace:*",
     "@forge/db": "workspace:*",
     "@forge/git": "workspace:*",
     "@forge/jobs": "workspace:*",
     "@forge/queue": "workspace:*",
-    "@forge/shared": "workspace:*",
     "@forge/sandbox": "workspace:*",
-    "@anthropic-ai/sdk": "^0.70.0",
+    "@forge/shared": "workspace:*",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.44.7",
     "lucide-react": "^0.552.0",
@@ -29,6 +29,7 @@
     "pg": "^8.16.3",
     "react": "19.2.1",
     "react-dom": "19.2.1",
+    "ssh2": "^1.17.0",
     "tsx": "^4.20.0"
   },
   "devDependencies": {
@@ -37,9 +38,10 @@
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ssh2": "^1.15.6",
+    "drizzle-kit": "^0.31.4",
     "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3",
-    "drizzle-kit": "^0.31.4",
     "vitest": "^3.2.4"
   }
 }

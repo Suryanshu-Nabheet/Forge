@@ -102,3 +102,62 @@ export const commits = pgTable(
     index("commits_repo_idx").on(t.repoId),
   ],
 );
+
+// ---------- social layer: stars, forks, watchers ----------
+
+export const stars = pgTable(
+  "stars",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("stars_repo_user_idx").on(t.repoId, t.userId),
+    index("stars_repo_idx").on(t.repoId),
+    index("stars_user_idx").on(t.userId),
+  ],
+);
+
+export const watchers = pgTable(
+  "watchers",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("watchers_repo_user_idx").on(t.repoId, t.userId),
+    index("watchers_repo_idx").on(t.repoId),
+    index("watchers_user_idx").on(t.userId),
+  ],
+);
+
+/** Fork lineage: every fork repo points back at its origin. */
+export const forkedRepos = pgTable(
+  "forked_repos",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .unique(),
+    forkedFromRepoId: integer("forked_from_repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    forkedAt: timestamp("forked_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("forked_from_idx").on(t.forkedFromRepoId),
+  ],
+);

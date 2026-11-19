@@ -30,6 +30,14 @@ export async function diffCommits(gitDir: string, base: string, head: string): P
   return parseUnifiedDiff(out);
 }
 
+/** Diff between two arbitrary revs, resolved from branch/tag/sha names. */
+export async function diffRevs(gitDir: string, baseRev: string, headRev: string): Promise<DiffFile[]> {
+  const out = await gitIn(gitDir, [
+    "diff", "--find-renames", "--no-color", `${baseRev}...${headRev}`,
+  ]);
+  return parseUnifiedDiff(out);
+}
+
 /** Diff a single file across base..head (used for inline comment anchoring). */
 export async function diffFileCommits(gitDir: string, base: string, head: string, filePath: string): Promise<DiffFile | null> {
   const out = await gitIn(gitDir, [

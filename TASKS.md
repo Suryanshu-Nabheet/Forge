@@ -50,3 +50,15 @@
 - [x] 6.4 `pnpm test` green
 - [x] 6.5 `pnpm build` green
 - [x] 6.6 README.md with exact run commands
+
+## Phase 7 — Collaboration surface completion
+- [x] 7.1 Commit history page (`/[org]/[repo]/commits`) — per-branch, tags shown, links to detail pages
+- [x] 7.2 Commit detail page (`/commits/[sha]`) — message body, stats, per-commit diff, parent links
+- [x] 7.3 Compare page (`/compare`) — branch × branch commit list + diff + "open pull request"
+- [x] 7.4 SSH transport (`ssh-server.ts`) — git-over-SSH on FORGE_SSH_PORT, public-key auth against stored keys, protocol v2, same hook chain as HTTP
+- [x] 7.5 Storage-root resolution hardening (monorepo-relative paths work from any cwd)
+- [x] 7.6 Stars + watchers (tables, toggle APIs, header buttons with counts, 401s for anonymous)
+- [x] 7.7 Forks (git mirror clone into forker's personal org, lineage table, collision suffixing, lineage shown on both sides)
+- [x] 7.8 Webhooks (tables, CRUD API with write gate, HMAC-SHA256 signed delivery, delivery log, ping/push/pull_request/pr_merged events, hardening: timeout, no redirects, response cap, http(s) only)
+- [x] 7.9 e2e-new-features suite (19 tests) — all four features covered against a real server
+- [x] 7.10 `pnpm typecheck` + `pnpm test` (83 green) + `pnpm build` all green

@@ -62,11 +62,13 @@ export default async function CodePage({ params, searchParams }: PageProps) {
         <div className="card divide-y">
           {commits.length === 0 && <div className="px-4 py-4 text-[13px] text-[var(--text-dim)]">No commits yet.</div>}
           {commits.map((c) => (
-            <div key={c.sha} className="px-4 py-2.5 flex items-baseline gap-3">
-              <span className="mono text-xs text-[var(--accent)] shrink-0">{c.sha.slice(0, 7)}</span>
-              <span className="text-[13px] truncate flex-1">{c.message}</span>
-              <span className="text-xs text-[var(--text-faint)] shrink-0">{c.authorName}</span>
-            </div>
+            <a key={c.sha} href={`/${org}/${repo}/commits/${c.sha}`} className="block px-4 py-2.5 hover:bg-[var(--bg-hover)]">
+              <div className="flex items-baseline gap-3">
+                <span className="mono text-xs text-[var(--accent)] shrink-0">{c.sha.slice(0, 7)}</span>
+                <span className="text-[13px] truncate flex-1">{c.message}</span>
+                <span className="text-xs text-[var(--text-faint)] shrink-0">{c.authorName}</span>
+              </div>
+            </a>
           ))}
         </div>
       </section>

@@ -104,6 +104,13 @@ async function main() {
   // Internal token for hooks (curl from hooks is localhost-only by default)
   server.listen(port, async () => {
     console.log(`[forge] web + git + hooks listening on http://localhost:${port}`);
+    // SSH transport (git@ style clone/push) — optional, separate port.
+    try {
+      const { startSshServer } = await import("./ssh-server");
+      startSshServer();
+    } catch (err) {
+      console.error("[forge] ssh transport failed to start:", err);
+    }
     await startWorker(ssePublish);
   });
 

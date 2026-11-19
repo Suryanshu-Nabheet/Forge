@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { WebhooksPanel } from "@/components/WebhooksPanel";
 
 interface Settings {
   protectedBranches: string[];
@@ -90,6 +91,15 @@ export default function RepoSettingsPage() {
             </span>
           </div>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold mb-1">Webhooks</h2>
+        <p className="text-[13px] text-[var(--text-dim)] mb-3">
+          Deliver signed event payloads (push, pull_request, pr_merged, ping) to your endpoints.
+          Each delivery is HMAC-SHA256 signed with a per-hook secret (<code className="mono">X-Forge-Signature</code>).
+        </p>
+        <WebhooksPanel org={orgSlug} repo={repoName} />
       </section>
 
       <section>

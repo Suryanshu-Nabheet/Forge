@@ -9,6 +9,7 @@ export type JobType = "semantic_index" | "pr_review" | "qa_answer" | "intent_pla
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export type PreviewStatus = "queued" | "building" | "running" | "failed" | "exited";
 export type CommentKind = "ai_review" | "ai_plan" | "human";
+export type WebhookEventName = "push" | "pull_request" | "pr_merged" | "ping";
 
 // ---------- Git ----------
 export interface GitRefUpdate {
@@ -123,7 +124,7 @@ export interface JobPayloadMap {
   preview_build: { repoId: number; prId: number; commitSha: string; branch: string };
 }
 
-export type JobPayload<T extends JobType> = JobPayloadMap[T];
+export type JobPayload<T extends keyof JobPayloadMap> = JobPayloadMap[T];
 
 // ---------- API shapes ----------
 export interface RepoSummary {
@@ -181,4 +182,35 @@ export interface SshKeyInfo {
   title: string;
   fingerprint: string;
   createdAt: string;
+}
+
+// ---------- Webhooks ----------
+
+export interface WebhookSummary {
+  id: number;
+  url: string;
+  events: WebhookEventName[];
+  active: boolean;
+  createdAt: string;
+}
+
+export interface WebhookDeliverySummary {
+  id: number;
+  webhookId: number;
+  event: string;
+  status: "pending" | "delivered" | "failed";
+  responseStatus: number | null;
+  durationMs: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+/** Payload shape delivered to webhook endpoints (HMAC-SHA256 signed). */
+export interface WebhookPayload {
+  event: WebhookEventName;
+  repository: { org: string; name: string; visibility: Visibility };
+  sender?: { handle: string; name: string } | null;
+  ref?: string;
+  commits?: Array<{ sha: string; message: string; author: string }>;
+  pullRequest?: { number: number; title: string; base: string; head: string; status: PrStatus };
 }

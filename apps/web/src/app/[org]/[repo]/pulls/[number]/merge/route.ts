@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { db, organizations, repositories, pullRequests, branches, activities, intents, prApprovals } from "@forge/db";
 import { repoGitDir, revParse } from "@forge/git";
+import { dispatchWebhookEvent } from "@forge/jobs";
 
 const exec = promisify(execFile);
 
@@ -106,6 +107,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     if (pr.intentId) {
       await db.update(intents).set({ status: "done", updatedAt: new Date() }).where(eq(intents.id, pr.intentId));
     }
+
+    // pr_merged webhook — never blocks the merge response.
+    void dispatchWebhookEvent(r.repoId, {
+      event: "pr_merged",
+      repository: { org, name: repo, visibility: r.visibility },
+      sender: { handle: user.handle, name: user.name },
+      pullRequest: { number: pr.number, title: pr.title, base: pr.baseBranch, head: pr.headBranch, status: "merged" },
+    }).catch(() => {});
 
     return NextResponse.json({ ok: true, merged: mergeSha, strategy });
   } catch (err) {
