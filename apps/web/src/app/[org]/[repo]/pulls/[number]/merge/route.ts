@@ -80,7 +80,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
       await exec("git", ["-C", work, ...author, "merge", "--no-ff", "-m", `Merge pull request #${pr.number}: ${pr.title}`, `refs/heads/${pr.headBranch}`]);
     }
     mergeSha = (await exec("git", ["-C", work, "rev-parse", "HEAD"])).stdout.trim();
-    await exec("git", ["-C", work, "push", "--quiet", gitDir, `HEAD:refs/heads/${pr.baseBranch}`]);
+    await exec("git", ["-C", work, "push", "--quiet", gitDir, `HEAD:refs/heads/${pr.baseBranch}`], {
+      env: { ...process.env, FORGE_ALLOW_PROTECTED_BRANCH_PUSH: "1" },
+    });
 
     await db.update(pullRequests).set({
       status: "merged",

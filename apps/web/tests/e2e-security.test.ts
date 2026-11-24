@@ -310,6 +310,19 @@ describe("branch protection", () => {
     ).rejects.toThrow(/pre-receive hook declined|non-fast-forward/);
   });
 
+  it("rejects direct fast-forward pushes to a protected branch", async () => {
+    const tmp = (globalThis as unknown as { __bpTmp: string }).__bpTmp;
+    const execFile = (await import("node:child_process")).execFile;
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    const url = `http://adasec:${pat}@localhost:${PORT}/git/bporg/protected.git`;
+    await exec("git", ["-C", tmp, "fetch", "-q", url, "main"]);
+    await exec("git", ["-C", tmp, "checkout", "-q", "-B", "direct-update", "FETCH_HEAD"]);
+    await exec("bash", ["-c", `cd ${tmp} && echo direct > direct.txt && git add . && git -c user.name=T -c user.email=t@t commit -qm direct`]);
+    await expect(exec("git", ["-C", tmp, "push", "-q", url, "HEAD:main"]))
+      .rejects.toThrow(/pre-receive hook declined|approved pull request/);
+  });
+
   it("rejects deletion of a protected branch", async () => {
     const execFile = (await import("node:child_process")).execFile;
     const { promisify } = await import("node:util");

@@ -99,9 +99,10 @@ export function hookToken(): string {
 
 
 /**
- * Branch protection: a pre-receive hook that rejects non-fast-forward
- * updates (force pushes) and deletions of protected branches. The
- * protected list is stored in the bare repo's git config
+ * Branch protection: a pre-receive hook that rejects direct updates
+ * (except initial creation), non-fast-forward updates, and deletions of
+ * protected branches. The approved PR merge route sets a private process
+ * marker for its controlled push. The protected list is stored in git config
  * (forge.protectedBranches) so the hook has no DB dependency.
  */
 const PRE_RECEIVE_HOOK = [
@@ -118,6 +119,10 @@ const PRE_RECEIVE_HOOK = [
   '    *":$branch:"*)',
   '      if [ "$new" = "$zero" ]; then',
   '        echo "forge: refusing to delete protected branch \\"$branch\\"" >&2',
+  "        exit 1",
+  "      fi",
+  '      if [ "$old" != "$zero" ] && [ "${FORGE_ALLOW_PROTECTED_BRANCH_PUSH:-}" != "1" ]; then',
+  '        echo "forge: protected branch updates must be made through an approved pull request" >&2',
   "        exit 1",
   "      fi",
   '      if [ "$old" != "$zero" ] && [ "$(git merge-base --is-ancestor $old $new; echo $?)" != "0" ]; then',

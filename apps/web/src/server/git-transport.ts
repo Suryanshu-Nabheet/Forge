@@ -175,6 +175,8 @@ async function pipeCgi(
     GATEWAY_INTERFACE: "CGI/1.1",
     REQUEST_URI: url.pathname + (url.search || ""),
     HTTP_ACCEPT: (req.headers.accept ?? "*/*") as string,
+    // Never inherit the merge route's private protected-branch bypass marker.
+    FORGE_ALLOW_PROTECTED_BRANCH_PUSH: "",
   };
 
   const child = spawn(GIT_HTTP_BACKEND, [], {

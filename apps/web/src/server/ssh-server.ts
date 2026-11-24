@@ -244,6 +244,8 @@ async function handleGitOverSsh(
       // Hooks read these:
       FORGE_HOOK_TOKEN: process.env.FORGE_HOOK_TOKEN ?? "",
       FORGE_POST_RECEIVE_URL: process.env.FORGE_POST_RECEIVE_URL ?? "",
+      // Authenticated users still cannot bypass protected-branch PR rules.
+      FORGE_ALLOW_PROTECTED_BRANCH_PUSH: "",
     },
   });
 
