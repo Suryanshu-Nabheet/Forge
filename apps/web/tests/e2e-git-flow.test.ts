@@ -69,6 +69,7 @@ beforeAll(async () => {
   await db.connect();
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,
+    detached: true,
     env: {
       ...process.env,
       FORGE_PORT: String(PORT),
@@ -86,7 +87,9 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  server?.kill("SIGKILL");
+  if (server?.pid) {
+    try { process.kill(-server.pid, "SIGKILL"); } catch { server.kill("SIGKILL"); }
+  }
   if (work) await rm(work, { recursive: true, force: true }).catch(() => {});
   await rm(DATA, { recursive: true, force: true }).catch(() => {});
   await db.end().catch(() => {});

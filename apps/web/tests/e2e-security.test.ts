@@ -58,6 +58,7 @@ beforeAll(async () => {
   // Boot the server; capture its stdout to learn the hook token (printed for tests).
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,
+    detached: true,
     env: {
       ...process.env,
       DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}`,
@@ -75,7 +76,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.end().catch(() => {});
-  server?.kill("SIGKILL");
+  if (server?.pid) {
+    try { process.kill(-server.pid, "SIGKILL"); } catch { server.kill("SIGKILL"); }
+  }
   await new Promise((r) => setTimeout(r, 300));
   await exec("rm", ["-rf", DATA]).catch(() => {});
 });

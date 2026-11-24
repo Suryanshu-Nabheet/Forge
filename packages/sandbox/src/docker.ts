@@ -41,9 +41,12 @@ export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
       return { ok: true, exitCode: 0, durationMs: Date.now() - startedAt, adapter: "docker", output: "nothing to build" };
     }
 
-    const script = hasDockerfile
-      ? "docker build -t forge-preview /app && echo built"
-      : "npm install --no-audit --no-fund --ignore-scripts && (npm run build --if-present || true)";
+    if (hasDockerfile) {
+      spec.onLog("[sandbox:docker] BLOCKED: repository Dockerfiles are not built through the host Docker daemon");
+      return { ok: false, exitCode: null, durationMs: Date.now() - startedAt, adapter: "docker", output: "Dockerfile builds are disabled" };
+    }
+
+    const script = "cp -R /src/. /work/ && cd /work && npm install --no-audit --no-fund --ignore-scripts && npm run build --if-present";
 
     const args = [
       "run",
@@ -51,16 +54,22 @@ export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
       "--name", containerName,
       "--cpus", CPUS,
       "--memory", MEM,
-      "--network", "bridge",
+      "--network", "none",
+      "--cap-drop", "ALL",
+      "--security-opt", "no-new-privileges",
+      "--read-only",
+      "--user", "1000:1000",
+      "--pids-limit", "128",
       "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-      "-v", `${workDir}:/app:ro`,
-      "-w", "/app",
+      "--tmpfs", "/work:rw,nosuid,size=256m,uid=1000,gid=1000",
+      "-v", `${workDir}:/src:ro`,
+      "-w", "/work",
       "node:22-alpine",
       "sh", "-c", script,
     ];
     spec.onLog(`[sandbox:docker] docker ${args.slice(0, 6).join(" ")}…`);
 
-    const result = await streamCommand(args, spec.onLog);
+    const result = await streamCommand(args, containerName, spec.onLog);
     return { ...result, adapter: "docker" };
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -68,7 +77,7 @@ export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
   }
 }
 
-function streamCommand(args: string[], onLog: (l: string) => void): Promise<Omit<BuildResult, "adapter">> {
+function streamCommand(args: string[], containerName: string, onLog: (l: string) => void): Promise<Omit<BuildResult, "adapter">> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -77,11 +86,16 @@ function streamCommand(args: string[], onLog: (l: string) => void): Promise<Omit
     const timer = setTimeout(() => {
       killed = true;
       onLog("[sandbox:docker] timeout — stopping container");
+      execFile("docker", ["kill", containerName], () => {});
       child.kill("SIGKILL");
     }, TIMEOUT_MS);
     const append = (chunk: Buffer) => {
-      output += chunk.toString();
-      for (const line of chunk.toString().split("\n")) if (line.trim()) onLog(line.slice(0, 2000));
+      const used = Buffer.byteLength(output);
+      if (used < 2 * 1024 * 1024) {
+        const accepted = chunk.subarray(0, 2 * 1024 * 1024 - used);
+        output += accepted.toString();
+        for (const line of accepted.toString().split("\n")) if (line.trim()) onLog(line.slice(0, 2000));
+      }
     };
     child.stdout.on("data", append);
     child.stderr.on("data", append);

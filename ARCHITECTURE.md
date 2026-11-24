@@ -192,8 +192,8 @@ never throw into the caller — pushes and merges complete regardless.
 
 Every PR push triggers a preview build. Adapters, feature-detected at runtime:
 
-- **Docker adapter** (when Docker is up): build from a `git archive` snapshot with `--cpus`, `--memory`, tmpfs, no network except npm registry, `docker logs --follow` streaming, `docker stop` on timeout.
-- **Process adapter** (fallback; used on this machine): `child_process.spawn` with a per-preview temp dir (`git archive | tar -x`), sanitized env (`PATH`, `HOME=tmpdir`, registry), 60s timeout, 2MB output cap, global concurrency semaphore (4), process-group kill (`detached: true`, `kill(-pid)`), and a **lifecycle-script prescan** that blocks `postinstall` scripts matching `curl … | sh` and friends. Logs stream → `job_events` → SSE → PR page.
+- **Docker adapter** (when Docker is up): run builds from a `git archive` snapshot in a non-root container with dropped capabilities, no network, read-only root/source, bounded tmpfs, CPU/memory/PID limits, and lifecycle install scripts disabled. Repository Dockerfiles are rejected; they must not be passed to the host Docker daemon.
+- **Process adapter**: does not execute repository-controlled code. It reports a build as unavailable when Docker is absent. This avoids treating a scrubbed child process as a security boundary. Logs stream → `job_events` → SSE → PR page.
 
 ## 8. Auth & sessions
 
@@ -242,7 +242,7 @@ secret shown once, delivery log, delete).
 - `pnpm typecheck` — tsc across the monorepo
 - `pnpm test` — 83 Vitest tests across 6 suites, all booting real servers and driving real git where relevant:
   - **unit-engines**: diff parser (line anchors, add/remove/rename), deterministic heuristic review (secrets/eval/missing tests/risk), local embedder (unit vectors, similarity ordering, determinism), lifecycle-script prescan
-  - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox builds (success path streams `npm run build` output; `curl|sh` postinstall is BLOCKED pre-execution), `git archive` extraction fidelity
+  - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox host-execution refusal, `curl|sh` postinstall blocking, `git archive` extraction fidelity
   - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, manual PR open + duplicate 409 + no-diff 400, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations
   - **e2e-auth-issues**: anonymous 401s, register/login/logout, weak-password rejection, session-scoped keys/PATs, UI page rendering (dashboard/org/repo/file view), PR close/reopen → intent status sync, human comments, merge → intent done
   - **e2e-security**: private-repo page gating (anon + non-member), search leakage, org takeover 403, forged hook-token 403, SSE session required, PAT create→use→revoke→rejected, SSH key delete, member promotion grants access, branch protection (force-push/deletion rejected, unprotected allowed, owner settings API), login brute-force lockout (429 + Retry-After)

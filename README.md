@@ -21,7 +21,7 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **Login rate limiting** | 5 failed attempts per email+IP per minute → 429 with Retry-After. |
 | **Semantic code search & Q&A** | Pushes trigger indexing: files are chunked (symbol-aware for code, heading-aware for prose) and embedded. `/search` does global semantic search; the repo "Ask AI" page answers natural-language questions with file:line citations. |
 | **Spec-to-PR workflow** | "Draft implementation plan" generates a structured plan (files to create/modify, steps, acceptance criteria). "Create branch scaffold" pushes a spec branch with a committed `docs/intents/*.md`. |
-| **Ephemeral previews** | Every PR push builds in an isolated sandbox — Docker adapter when available, hardened child-process adapter otherwise (sanitized env, 60s timeout, 2MB output cap, concurrency limit, process-group kill, malicious-lifecycle-script prescan). Build logs stream into the PR page. |
+| **Ephemeral previews** | Every PR push attempts a containerized build when Docker is available (non-root, no network, read-only source, resource limits, lifecycle scripts disabled during install). If Docker is unavailable, repository code is not executed on the Forge host and the preview is marked unavailable. Repository Dockerfiles are currently rejected because building them through the host Docker daemon is unsafe. Build logs stream into the PR page. |
 | **Zero-config local dev** | Postgres is the only hard dependency. Queue, embeddings, and sandbox all have local fallbacks; Redis, Docker, pgvector, and the Claude API slot in automatically when present. |
 
 ## Quickstart

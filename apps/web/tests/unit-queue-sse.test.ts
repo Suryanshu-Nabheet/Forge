@@ -103,16 +103,17 @@ describe("sandbox process runner", () => {
     await rm(REPO_ROOT, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("runs npm install --ignore-scripts + build, streaming logs", async () => {
+  it("refuses to execute repository build scripts on the host when Docker is unavailable", async () => {
     const lines: string[] = [];
     const result = await runProcessBuild({
       gitDir,
       commitSha,
       onLog: (l) => lines.push(l),
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.adapter).toBe("process");
-    expect(lines.some((l) => l.includes("hello-from-build"))).toBe(true);
+    expect(result.output).toContain("Docker is required");
+    expect(lines.some((l) => l.includes("host process builds are disabled"))).toBe(true);
   }, 90_000);
 
   it("blocks dangerous lifecycle scripts before running anything", async () => {

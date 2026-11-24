@@ -98,6 +98,7 @@ beforeAll(async () => {
 
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,
+    detached: true,
     env: {
       ...process.env,
       DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}`,
@@ -118,9 +119,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.end().catch(() => {});
   hookServer?.close();
-  server?.kill("SIGKILL");
-  // Leftover tsx/node children are swept by global-setup at the next run;
-  // killing by port from inside the worker upsets the vitest IPC channel.
+  if (server?.pid) {
+    try { process.kill(-server.pid, "SIGKILL"); } catch { server.kill("SIGKILL"); }
+  }
   await new Promise((r) => setTimeout(r, 300));
   await exec("rm", ["-rf", DATA]).catch(() => {});
 });
@@ -324,7 +325,7 @@ describe("SSH transport", () => {
 
   it("clones a public repo over SSH with the registered key", async () => {
     const work = await mkdtemp(path.join(tmpdir(), "ssh-clone-"));
-    const ssh = `ssh -i ${path.join(keyDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+    const ssh = `ssh -F /dev/null -i ${path.join(keyDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
     await exec("git", ["clone", `ssh://git@localhost:${SSH_PORT}/socorg/widget.git`, work], {
       env: { ...process.env, GIT_SSH_COMMAND: ssh },
     });
@@ -335,7 +336,7 @@ describe("SSH transport", () => {
 
   it("pushes over SSH and the DB syncs through the hook chain", async () => {
     const work = await mkdtemp(path.join(tmpdir(), "ssh-push-"));
-    const ssh = `ssh -i ${path.join(keyDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+    const ssh = `ssh -F /dev/null -i ${path.join(keyDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
     await exec("git", ["clone", `ssh://git@localhost:${SSH_PORT}/socorg/widget.git`, work], {
       env: { ...process.env, GIT_SSH_COMMAND: ssh },
     });
@@ -356,7 +357,7 @@ describe("SSH transport", () => {
   it("rejects an unknown key", async () => {
     const strangerDir = await mkdtemp(path.join(tmpdir(), "stranger-"));
     await exec("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", path.join(strangerDir, "id_ed25519"), "-q"]);
-    const ssh = `ssh -i ${path.join(strangerDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+    const ssh = `ssh -F /dev/null -i ${path.join(strangerDir, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
     const work = await mkdtemp(path.join(tmpdir(), "ssh-deny-"));
     await expect(exec("git", ["clone", `ssh://git@localhost:${SSH_PORT}/socorg/widget.git`, work], {
       env: { ...process.env, GIT_SSH_COMMAND: ssh },
@@ -386,7 +387,7 @@ describe("SSH transport", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "grace-key", publicKey: gpub.stdout.trim() }),
     });
-    const ssh = `ssh -i ${path.join(gk, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
+    const ssh = `ssh -F /dev/null -i ${path.join(gk, "id_ed25519")} -p ${SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null`;
     const work = await mkdtemp(path.join(tmpdir(), "ssh-priv-"));
     await expect(exec("git", ["clone", `ssh://git@localhost:${SSH_PORT}/socorg/vault.git`, work], {
       env: { ...process.env, GIT_SSH_COMMAND: ssh },

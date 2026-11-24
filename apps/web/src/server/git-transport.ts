@@ -2,6 +2,8 @@
 // Handles Basic auth (PAT) + session-cookie auth, enforces repo scopes.
 
 import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { accessSync } from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { and, eq } from "drizzle-orm";
@@ -10,15 +12,20 @@ import { organizations, repositories, orgMembers } from "@forge/db";
 
 const CANDIDATE_BACKENDS = [
   "/opt/homebrew/opt/git/libexec/git-core/git-http-backend",
+  "/usr/local/libexec/git-core/git-http-backend",
   "/usr/local/opt/git/libexec/git-core/git-http-backend",
   "/usr/libexec/git-core/git-http-backend",
   "/usr/lib/git-core/git-http-backend",
 ];
 
 function gitHttpBackendPath(): string {
-  for (const p of CANDIDATE_BACKENDS) {
+  let execPath = "";
+  try {
+    execPath = execFileSync("git", ["--exec-path"], { encoding: "utf8" }).trim();
+  } catch { /* fall back to common install paths */ }
+  for (const p of [...(execPath ? [path.join(execPath, "git-http-backend")] : []), ...CANDIDATE_BACKENDS]) {
     try {
-      require("node:fs").accessSync(p);
+      accessSync(p);
       return p;
     } catch { /* try next */ }
   }
@@ -182,6 +189,7 @@ async function pipeCgi(
   // Parse CGI response: headers then body. First chunk may contain partial headers.
   let headerBuf = Buffer.alloc(0);
   let headersDone = false;
+  let responseDone = false;
   let status = 200;
   const responseHeaders: Record<string, string> = {};
 
@@ -213,19 +221,32 @@ async function pipeCgi(
   });
 
   child.stdout.on("end", () => {
+    if (responseDone || res.destroyed) return;
     if (!headersDone) {
       // No headers received — treat as error
       res.writeHead(502, { "Content-Type": "text/plain" });
     }
+    responseDone = true;
     res.end();
   });
 
   child.stderr.on("data", () => {/* log only */});
 
   child.on("error", (err) => {
+    if (responseDone || res.destroyed) return;
+    responseDone = true;
     if (!headersDone) {
       res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end(`git transport error: ${err.message}`);
+      return;
     }
-    res.end(`git transport error: ${err.message}`);
+    // The CGI response already started; it cannot be replaced with an error
+    // status or an appended text body without corrupting the Git protocol.
+    res.destroy(err);
+  });
+
+  req.on("aborted", () => child.kill("SIGKILL"));
+  res.on("close", () => {
+    if (!res.writableEnded) child.kill("SIGKILL");
   });
 }

@@ -68,6 +68,7 @@ beforeAll(async () => {
   await db.connect();
   server = spawn("pnpm", ["exec", "tsx", "src/server/server.ts"], {
     cwd: ROOT,
+    detached: true,
     env: {
       ...process.env,
       FORGE_PORT: String(PORT),
@@ -82,7 +83,9 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  server?.kill("SIGKILL");
+  if (server?.pid) {
+    try { process.kill(-server.pid, "SIGKILL"); } catch { server.kill("SIGKILL"); }
+  }
   await db.end().catch(() => {});
   // Give the OS a beat to release DB connections, then drop.
   await new Promise((r) => setTimeout(r, 1500));
@@ -206,6 +209,7 @@ describe("repository + intent + PR lifecycle", () => {
     const path = (await import("node:path")).default;
     const dir = await mkdtemp(path.join(tmpdir(), "zoecorp-"));
     await exec("git", ["clone", "-q", `${BASE}/git/zoecorp/widgets.git`, dir]);
+    await exec("git", ["-C", dir, "checkout", "-q", "-b", "main"]);
     await mkdir(path.join(dir, "src"), { recursive: true });
     await writeFile(path.join(dir, "src", "index.ts"), "export function widget(): number {\n  return 42;\n}\n");
     await writeFile(path.join(dir, "package.json"), '{"name":"widgets","scripts":{"build":"echo built"}}');

@@ -2,6 +2,7 @@
 // This is the single process story: `pnpm dev` boots web + git + workers together.
 
 import { createServer, type Server } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import nextFactory from "next";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -60,7 +61,7 @@ async function main() {
       if (req.method === "POST" && pathname === "/internal/hooks/post-receive") {
         // Authenticated with the shared hook token (constant-time compare).
         const presented = String(req.headers["x-forge-hook-token"] ?? "");
-        if (presented !== process.env.FORGE_HOOK_TOKEN) {
+        if (!safeTokenEqual(presented, process.env.FORGE_HOOK_TOKEN ?? "")) {
           res.writeHead(403, { "Content-Type": "text/plain" });
           res.end("invalid hook token");
           return;
@@ -121,6 +122,12 @@ async function main() {
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+}
+
+function safeTokenEqual(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented);
+  const b = Buffer.from(expected);
+  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
 function readBody(req: import("node:http").IncomingMessage, limit = 10 * 1024 * 1024): Promise<string> {
