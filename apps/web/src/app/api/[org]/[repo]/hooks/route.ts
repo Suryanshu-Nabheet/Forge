@@ -7,11 +7,10 @@ import { db, webhooks } from "@forge/db";
 import { currentUser } from "@/server/session";
 import { findVisibleRepo, canWriteRepo } from "@/server/authz";
 import { listWebhooks, webhookDeliveries } from "@/server/api";
-import { dispatchWebhookEvent, pingPayload } from "@forge/jobs";
+import { dispatchWebhookEvent, pingPayload, resolveWebhookTarget } from "@forge/jobs";
 import type { WebhookEventName } from "@forge/shared";
 
 const VALID_EVENTS = new Set<WebhookEventName>(["push", "pull_request", "pr_merged", "ping"]);
-const URL_RE = /^https?:\/\/.+/;
 
 export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
@@ -45,8 +44,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
 
   const body = (await req.json().catch(() => ({}))) as { url?: string; events?: string[] };
   const url = (body.url ?? "").trim();
-  if (!URL_RE.test(url) || url.length > 2048) {
+  if (url.length > 2048) {
     return NextResponse.json({ error: "url must be a valid http(s) URL" }, { status: 400 });
+  }
+  try {
+    await resolveWebhookTarget(url);
+  } catch {
+    return NextResponse.json({ error: "webhook URL must resolve only to a public http(s) destination" }, { status: 400 });
   }
   const events = (body.events ?? ["push"]).filter((e): e is WebhookEventName => VALID_EVENTS.has(e as WebhookEventName));
   if (events.length === 0) return NextResponse.json({ error: "at least one valid event required" }, { status: 400 });
@@ -67,8 +71,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   // Ping the new hook (fire-and-forget; delivery logged in webhook_deliveries).
   void dispatchWebhookEvent(info.repoId, pingPayload(org, repo, info.visibility)).catch(() => {});
 
-  // SSRF guard: only http(s) allowed (URL_RE); the delivery engine enforces
-  // redirect-follow=0 and a response size cap.
+  // The delivery engine resolves and pins the address again at delivery time.
   return NextResponse.json({
     id: row!.id,
     url: row!.url,

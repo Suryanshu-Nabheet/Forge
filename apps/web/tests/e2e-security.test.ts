@@ -172,6 +172,17 @@ describe("authorization perimeter", () => {
     expect(badToken.status).toBe(403);
   });
 
+  it("rejects webhook targets on loopback and metadata networks", async () => {
+    for (const url of ["http://127.0.0.1:8080/", "http://169.254.169.254/latest/meta-data/"]) {
+      const res = await jarFetch(ada)("/api/secorg/secret/hooks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, events: ["push"] }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("SSE endpoint requires a session", async () => {
     const res = await fetch(`${BASE}/api/sse/pr-1`);
     expect(res.status).toBe(401);

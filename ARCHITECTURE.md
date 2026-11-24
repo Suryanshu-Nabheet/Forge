@@ -183,9 +183,11 @@ Job types: `semantic_index`, `pr_review`, `qa_answer`, `intent_plan`, `preview_b
 Per-repo hooks (`webhooks` table) receive events on push (from the post-receive handler),
 pull_request open (auto + manual), pr_merged (from the merge route), and ping (on hook
 creation). Delivery: POST the JSON payload with `X-Forge-Event`, `X-Forge-Delivery`, and
-`X-Forge-Signature: sha256=<HMAC-SHA256(secret, body)>` headers. Hardened: http(s) URLs
-only, no redirect-following, 10s timeout, 64KB response drain cap. Every attempt is a
-`webhook_deliveries` row (status, responseStatus, durationMs, error). Delivery failures
+`X-Forge-Signature: sha256=<HMAC-SHA256(secret, body)>` headers. Hardened: http(s) URLs,
+no redirect-following, 10s timeout, 64KB response cap, and rejection of loopback,
+private, link-local, reserved, and metadata addresses. DNS results are checked and
+the chosen public address is pinned for each request to prevent rebinding. Every
+attempt is a `webhook_deliveries` row (status, responseStatus, durationMs, error). Delivery failures
 never throw into the caller — pushes and merges complete regardless.
 
 ## 7. Ephemeral sandbox runner (`packages/sandbox`)

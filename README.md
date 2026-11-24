@@ -12,7 +12,7 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **Manual PRs** | Open a pull request from any head → base pair via the UI/API — the `i{n}-*` intent convention is a convenience, not a requirement. |
 | **Commit & compare views** | Per-branch commit history with tags, per-commit diff pages (with parent links), and a branch-compare page (commits + full diff, with one-click "Open pull request"). |
 | **Stars, forks & watchers** | Star/watch any repo (counts on the header, toggles are optimistic); forks mirror the git data into your personal org with lineage tracked and shown on both sides. |
-| **Webhooks** | Per-repo hooks (push, pull_request, pr_merged, ping) with per-hook HMAC-SHA256 secrets, delivery log with status/latency/response codes, and hardening (10s timeout, no redirects, response cap, http(s) only). |
+| **Webhooks** | Per-repo hooks (push, pull_request, pr_merged, ping) with per-hook HMAC-SHA256 secrets, delivery log with status/latency/response codes, and hardening (10s timeout, no redirects, response cap, public-address validation, DNS-pinned delivery). |
 | **Branch protection** | Protected branches (default: `main`) reject force-pushes and deletions at a `pre-receive` hook. Owners manage the list per repo in the repo Settings tab. |
 | **PR approvals** | Approve / request changes in the PR page. Merging into a protected branch requires ≥1 approval from a non-author and zero outstanding change requests. |
 | **Org membership** | Private repos are readable/writable only by org members and owners, enforced across pages, API routes, git transport, search, and SSE. |

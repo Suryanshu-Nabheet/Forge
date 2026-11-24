@@ -106,6 +106,7 @@ beforeAll(async () => {
       FORGE_PORT: String(PORT),
       FORGE_SSH_PORT: String(SSH_PORT),
       FORGE_HOOK_TOKEN: "test-hook-token-123",
+      FORGE_WEBHOOK_ALLOW_PRIVATE_TARGETS: "1",
       // tests must not pick up a real key even if the machine has one
       ANTHROPIC_API_KEY: "",
     },
