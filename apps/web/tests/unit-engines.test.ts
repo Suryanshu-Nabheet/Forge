@@ -5,6 +5,7 @@ import { parseUnifiedDiff } from "@forge/git";
 import { heuristicReview } from "@forge/ai";
 import { embedLocal, cosine } from "@forge/ai";
 import { scanPackageJson } from "@forge/sandbox";
+import { triageLabels, findDuplicateIssues } from "@forge/ai";
 
 const SAMPLE_DIFF = `
 diff --git a/src/auth.ts b/src/auth.ts
@@ -163,5 +164,56 @@ describe("markdown renderer", () => {
     expect(html).toContain("<ul");
     expect(html).toContain("<pre");
     expect(html).toContain("const x = 1;");
+  });
+});
+
+
+// ---------- issue auto-triage (deterministic) ----------
+
+describe("triageLabels", () => {
+  it("labels security issues with priority", () => {
+    expect(triageLabels("Auth bypass via injection", "session check broken")).toEqual(["security", "bug"]);
+  });
+
+  it("caps at three labels, priority-ordered", () => {
+    const out = triageLabels("Slow login docs bug performance feature", "");
+    expect(out.length).toBeLessThanOrEqual(3);
+    expect(out[0]).toBe("bug"); // rules are priority-ordered: security, bug, performance…
+  });
+
+  it("returns empty for unmatched text", () => {
+    expect(triageLabels("hello world", "nothing here")).toEqual([]);
+  });
+
+  it("never duplicates labels across title and description", () => {
+    const out = triageLabels("crash in login", "the crash happens on load");
+    expect(out.filter((l) => l === "bug").length).toBe(1);
+  });
+});
+
+// ---------- duplicate issue detection ----------
+
+describe("findDuplicateIssues", () => {
+  it("ranks near-identical issues above threshold", () => {
+    const emb = embedLocal;
+    const pool = [
+      { number: 1, title: "Login page slow on mobile", description: null, embedding: emb("Login page slow on mobile\ntakes ages on phones", null) },
+      { number: 2, title: "Add dark mode toggle", description: null, embedding: emb("Add dark mode toggle\nin settings menu", null) },
+    ];
+    const hits = findDuplicateIssues(
+      { title: "Login screen very slow on phones", description: "mobile is sluggish" },
+      pool,
+    );
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.number).toBe(1);
+    expect(hits[0]!.similarity).toBeGreaterThan(0.42);
+  });
+
+  it("returns nothing for unrelated text", () => {
+    const emb = embedLocal;
+    const pool = [
+      { number: 1, title: "Add dark mode toggle", description: null, embedding: emb("Add dark mode toggle\nin settings menu", null) },
+    ];
+    expect(findDuplicateIssues({ title: "Git push rejected", description: "cannot push" }, pool)).toEqual([]);
   });
 });
