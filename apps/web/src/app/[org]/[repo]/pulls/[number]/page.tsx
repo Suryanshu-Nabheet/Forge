@@ -1,6 +1,6 @@
 import { findVisibleRepo } from "@/server/authz";
 import { getPr, prDiff, prComments, prPreviews, prJobEvents, listApprovals } from "@/server/api";
-import { repoGitDir } from "@forge/git";
+import { repoGitDir, isMergeable } from "@forge/git";
 import { prRiskColor, riskLabel } from "@/components/risk";
 import { PrActions } from "@/components/PrActions";
 import { Markdown } from "@/components/Markdown";
@@ -24,6 +24,10 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
     prJobEvents(pr.id),
     listApprovals(pr.id),
   ]);
+  // Conflict badge: base←head merges cleanly? (Only meaningful while open.)
+  const mergeable = pr.status === "open" && pr.baseSha && pr.headSha
+    ? await isMergeable(gitDir, pr.baseSha, pr.headSha)
+    : null;
 
   const aiComments = comments.filter((c) => c.kind === "ai_review");
   const humanComments = comments.filter((c) => c.kind === "human");
@@ -39,6 +43,16 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
         <h1 className="text-lg font-semibold">{pr.title}</h1>
         <span className="text-[var(--text-faint)]">#{pr.number}</span>
         <StatusBadge status={pr.status} />
+        {mergeable === false && (
+          <span className="text-xs text-[var(--red)] border border-[var(--red)] rounded-full px-2 py-px">
+            ✕ conflicts with base
+          </span>
+        )}
+        {mergeable === true && pr.status === "open" && (
+          <span className="text-xs text-[var(--green)] border border-[var(--green)] rounded-full px-2 py-px">
+            ✓ mergeable
+          </span>
+        )}
       </div>
       <div className="text-[13px] text-[var(--text-dim)] mb-4 mono">
         {pr.headBranch} → {pr.baseBranch} · {totalAdd}+ {totalDel}− · {diff.length} file{diff.length === 1 ? "" : "s"}

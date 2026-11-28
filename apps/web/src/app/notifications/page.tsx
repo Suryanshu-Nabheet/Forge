@@ -22,6 +22,8 @@ const TYPE_LABELS: Record<string, string> = {
   pr_changes_requested: "requested changes on a pull request",
   intent_created: "created an intent",
   intent_scaffolded: "scaffolded a branch for an intent",
+  intent_closed: "closed an intent",
+  intent_reopened: "reopened an intent",
 };
 
 export default function NotificationsPage() {
@@ -57,7 +59,7 @@ export default function NotificationsPage() {
   function hrefFor(n: Notification): string {
     const num = (n.data as { number?: number }).number;
     if (n.type.startsWith("pr_") && typeof num === "number") return `/${n.repo}/pulls/${num}`;
-    if (n.type.startsWith("intent") && typeof num === "number") return `/${n.repo}/issues/${num}`;
+    if (/^intent/.test(n.type) && typeof num === "number") return `/${n.repo}/issues/${num}`;
     if (n.type === "release_published") {
       const tag = (n.data as { tag?: string }).tag;
       return tag ? `/${n.repo}/releases` : `/${n.repo}`;

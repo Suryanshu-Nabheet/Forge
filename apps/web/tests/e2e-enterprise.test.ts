@@ -709,3 +709,60 @@ describe("releases", () => {
     expect(anon.ok).toBe(true);
   });
 });
+
+describe("intent management", () => {
+  it("edits title, sets labels, closes and reopens via PATCH", async () => {
+    const create = await sfetch(`/api/corp/grep-repo/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Original title", description: "before", kind: "issue" }),
+    });
+    const issue = (await create.json()) as { number: number };
+    expect(create.ok).toBe(true);
+
+    const edit = await sfetch(`/api/corp/grep-repo/issues/${issue.number}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Renamed", description: "after", labels: ["bug", "urgent"] }),
+    });
+    expect(edit.ok).toBe(true);
+    const row = (await db.query(`SELECT title, description, labels FROM intents WHERE number = $1 AND repo_id = (SELECT id FROM repositories WHERE name = 'grep-repo')`, [issue.number])).rows[0] as {
+      title: string; description: string; labels: string[];
+    };
+    expect(row.title).toBe("Renamed");
+    expect(row.description).toBe("after");
+    expect(row.labels).toEqual(["bug", "urgent"]);
+
+    const close = await sfetch(`/api/corp/grep-repo/issues/${issue.number}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "closed" }),
+    });
+    expect(close.ok).toBe(true);
+    const closedRow = (await db.query(`SELECT status, closed_at FROM intents WHERE number = $1 AND repo_id = (SELECT id FROM repositories WHERE name = 'grep-repo')`, [issue.number])).rows[0] as { status: string; closed_at: Date };
+    expect(closedRow.status).toBe("closed");
+    expect(closedRow.closed_at).not.toBeNull();
+
+    const reopen = await sfetch(`/api/corp/grep-repo/issues/${issue.number}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "open" }),
+    });
+    expect(reopen.ok).toBe(true);
+
+    // Invalid status rejected with 400.
+    const bad = await sfetch(`/api/corp/grep-repo/issues/${issue.number}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "done" }),
+    });
+    expect(bad.status).toBe(400);
+
+    // Audit trail.
+    const aud = await db.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action LIKE 'intent.%' AND target_id = $1`,
+      [`corp/grep-repo#${issue.number}`],
+    );
+    expect((aud.rows[0] as { n: number }).n).toBeGreaterThan(0);
+  });
+});

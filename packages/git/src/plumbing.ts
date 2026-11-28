@@ -318,3 +318,15 @@ export async function createTag(gitDir: string, name: string, targetSha: string,
     "tag", "-a", name, "-m", message, targetSha,
   ]);
 }
+
+/** Mergeability check without touching the working tree (merge-tree). */
+export async function isMergeable(gitDir: string, baseSha: string, headSha: string): Promise<boolean> {
+  try {
+    const out = await gitIn(gitDir, ["merge-tree", baseSha, headSha], { maxBuffer: 1024 * 1024 });
+    // Old-style merge-tree output: conflicted merges contain
+    // "changed in both" blocks / "++++++" conflict markers.
+    return !out.includes("changed in both") && !out.includes("<<<<<<<");
+  } catch {
+    return false;
+  }
+}

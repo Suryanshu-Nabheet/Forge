@@ -59,4 +59,7 @@ export type AuditAction =
   | "webhook.create"
   | "webhook.delete"
   | "2fa.enable"
-  | "2fa.disable";
+  | "2fa.disable"
+  | "intent.edit"
+  | "intent.status_update"
+  | "release.create";

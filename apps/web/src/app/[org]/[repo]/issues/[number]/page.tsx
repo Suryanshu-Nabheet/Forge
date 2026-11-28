@@ -1,8 +1,10 @@
-import { findVisibleRepo } from "@/server/authz";
+import { findVisibleRepo, canWriteRepo } from "@/server/authz";
+import { currentUser } from "@/server/session";
 import { getIntent, intentLinksFor } from "@/server/api";
 import { db, pullRequests } from "@forge/db";
 import { eq } from "drizzle-orm";
 import { PlanActionsClient } from "@/components/PlanActionsClient";
+import { IntentSidebar } from "@/components/IntentSidebar";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +16,15 @@ export default async function IntentPage({ params }: { params: Promise<{ org: st
   const intent = await getIntent(info.repoId, num);
   if (!intent) return <div className="text-[var(--text-dim)]">Intent #{num} not found</div>;
   const links = await intentLinksFor(intent.id);
+  const user = await currentUser();
+  const canEdit = user ? await canWriteRepo(info.orgId, user.id) : false;
   const linkedPrRow = intent.linkedPrId
     ? (await db.select().from(pullRequests).where(eq(pullRequests.id, intent.linkedPrId)).limit(1))[0]
     : null;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="lg:col-span-2">
       <div className="flex items-baseline gap-3 mb-1">
         <h1 className="text-lg font-semibold">{intent.title}</h1>
         <span className="text-[var(--text-faint)]">#{intent.number}</span>
@@ -93,6 +98,20 @@ export default async function IntentPage({ params }: { params: Promise<{ org: st
             </div>
           ))}
         </div>
+      )}
+      </div>
+      {canEdit && (
+        <aside className="lg:col-span-1 space-y-4">
+          <IntentSidebar
+            org={org}
+            repo={repo}
+            number={intent.number}
+            status={intent.status}
+            labels={intent.labels}
+            title={intent.title}
+            description={intent.description ?? ""}
+          />
+        </aside>
       )}
     </div>
   );
