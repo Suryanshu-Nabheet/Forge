@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db, organizations, users, orgMembers, activities } from "@forge/db";
+import { db, organizations, users, orgMembers, activities, recordAudit } from "@forge/db";
 import { requireUser, unauthorized } from "@/server/session";
 import { roleInOrg } from "@/server/authz";
 
@@ -65,6 +65,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   await db.insert(orgMembers)
     .values({ orgId: o.id, userId: target.id, role: "member" })
     .onConflictDoNothing();
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "org.member_add", targetType: "org", targetId: o.slug, data: { handle } });
   return NextResponse.json({ ok: true });
 }
 
@@ -86,5 +87,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ org: 
     return NextResponse.json({ error: "cannot remove the org owner" }, { status: 400 });
   }
   await db.delete(orgMembers).where(and(eq(orgMembers.orgId, o.id), eq(orgMembers.userId, body.userId)));
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "org.member_remove", targetType: "org", targetId: o.slug, data: { userId: body.userId } });
   return NextResponse.json({ ok: true });
 }

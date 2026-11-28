@@ -5,3 +5,4 @@ export * from "./schema/repos";
 export * from "./schema/collab";
 export * from "./schema/ai";
 export * from "./schema/webhooks";
+export * from "./schema/audit";

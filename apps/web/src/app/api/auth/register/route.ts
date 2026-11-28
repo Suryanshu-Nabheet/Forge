@@ -1,7 +1,7 @@
 // POST /api/auth/register — create account + session.
 
 import { NextResponse } from "next/server";
-import { registerUser, createSession } from "@forge/db";
+import { registerUser, createSession, recordAudit } from "@forge/db";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HANDLE_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,38}$/;
@@ -21,6 +21,7 @@ export async function POST(req: Request) {
   try {
     const user = await registerUser(email, name, handle, password);
     const token = await createSession(user.id);
+    void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.register", targetType: "account", targetId: user.handle });
     const res = NextResponse.json({ ok: true, user });
     res.cookies.set("forge_session", token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 30 * 86400 });
     return res;

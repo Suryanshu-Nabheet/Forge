@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db, organizations, repositories, orgMembers } from "@forge/db";
+import { db, organizations, repositories, orgMembers, recordAudit } from "@forge/db";
 import { initBareRepo, repoGitDir, setProtectedBranches } from "@forge/git";
 import { requireUser, unauthorized } from "@/server/session";
 import { roleInOrg } from "@/server/authz";
@@ -70,5 +70,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "failed to initialize repository storage" }, { status: 500 });
   }
 
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "repo.create", targetType: "repo", targetId: `${orgSlug}/${name}`, data: { visibility: body.visibility === "private" ? "private" : "public" } });
   return NextResponse.json({ id: repo!.id, orgSlug, name });
 }

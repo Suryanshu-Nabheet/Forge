@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { db, webhooks } from "@forge/db";
+import { db, webhooks, recordAudit } from "@forge/db";
 import { currentUser } from "@/server/session";
 import { findVisibleRepo, canWriteRepo } from "@/server/authz";
 import { listWebhooks, webhookDeliveries } from "@/server/api";
@@ -71,6 +71,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   // Ping the new hook (fire-and-forget; delivery logged in webhook_deliveries).
   void dispatchWebhookEvent(info.repoId, pingPayload(org, repo, info.visibility)).catch(() => {});
 
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "webhook.create", targetType: "webhook", targetId: `${org}/${repo}#${row!.id}`, data: { events } });
   // The delivery engine resolves and pins the address again at delivery time.
   return NextResponse.json({
     id: row!.id,
@@ -95,5 +96,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ org: 
   const body = (await req.json().catch(() => ({}))) as { id?: number };
   if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
   await db.delete(webhooks).where(and(eq(webhooks.id, body.id), eq(webhooks.repoId, info.repoId)));
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "webhook.delete", targetType: "webhook", targetId: `${org}/${repo}#${body.id}` });
   return NextResponse.json({ ok: true });
 }

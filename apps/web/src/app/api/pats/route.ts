@@ -1,7 +1,7 @@
 // GET/POST /api/pats — personal access token management (session-scoped).
 
 import { NextResponse } from "next/server";
-import { db, personalAccessTokens, createPat, revokePat } from "@forge/db";
+import { db, personalAccessTokens, createPat, revokePat, recordAudit } from "@forge/db";
 import { desc, eq } from "drizzle-orm";
 import { requireUser, unauthorized } from "@/server/session";
 
@@ -25,7 +25,8 @@ export async function POST(req: Request) {
   const scopes = Array.isArray(body.scopes) && body.scopes.length > 0
     ? body.scopes.filter((s) => s === "repo:read" || s === "repo:write")
     : ["repo:read"];
-  const { token } = await createPat(user.id, name, scopes);
+  const { token, record } = await createPat(user.id, name, scopes);
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "pat.create", targetType: "pat", targetId: String(record.id), data: { name, scopes } });
   return NextResponse.json({ token });
 }
 
@@ -37,5 +38,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
   await revokePat(user.id, body.id);
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "pat.revoke", targetType: "pat", targetId: String(body.id) });
   return NextResponse.json({ ok: true });
 }

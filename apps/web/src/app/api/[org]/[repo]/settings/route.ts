@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { db, repositories } from "@forge/db";
+import { db, repositories, recordAudit } from "@forge/db";
 import { currentUser } from "@/server/session";
 import { findVisibleRepo } from "@/server/authz";
 import { roleInOrg } from "@/server/authz";
@@ -49,5 +49,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ org: str
 
   await db.update(repositories).set({ protectedBranches: branches }).where(eq(repositories.id, r.repoId));
   await setProtectedBranches(repoGitDir(org, repo), branches);
+  void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "repo.settings_update", targetType: "repo", targetId: `${org}/${repo}`, data: { protectedBranches: branches } });
   return NextResponse.json({ ok: true, protectedBranches: branches });
 }

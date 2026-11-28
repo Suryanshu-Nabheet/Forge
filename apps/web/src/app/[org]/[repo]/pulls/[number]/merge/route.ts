@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, repositories, pullRequests, branches, activities, intents, prApprovals } from "@forge/db";
+import { db, repositories, pullRequests, branches, activities, intents, prApprovals, recordAudit } from "@forge/db";
 import { repoGitDir, revParse } from "@forge/git";
 import { dispatchWebhookEvent } from "@forge/jobs";
 
@@ -118,6 +118,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
       pullRequest: { number: pr.number, title: pr.title, base: pr.baseBranch, head: pr.headBranch, status: "merged" },
     }).catch(() => {});
 
+    void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "pr.merge", targetType: "pr", targetId: `${org}/${repo}#${pr.number}`, data: { strategy } });
     return NextResponse.json({ ok: true, merged: mergeSha, strategy });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "merge failed" }, { status: 500 });

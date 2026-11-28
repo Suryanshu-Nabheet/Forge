@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { and, eq, desc } from "drizzle-orm";
-import { db, pullRequests, prApprovals, users, activities } from "@forge/db";
+import { db, pullRequests, prApprovals, users, activities, recordAudit } from "@forge/db";
 import { requireWritableRepo } from "@/server/authz";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
@@ -85,5 +85,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     });
   }
 
+  void recordAudit({ actorId: gate.user.id, actorHandle: gate.user.handle, action: state === "approved" ? "pr.approve" : "pr.request_changes", targetType: "pr", targetId: `${org}/${repo}#${num}` });
   return NextResponse.json({ ok: true, state });
 }

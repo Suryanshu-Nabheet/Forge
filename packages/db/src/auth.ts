@@ -3,9 +3,9 @@
 // Better-Auth was evaluated; for this MVP we own a tiny, auditable surface.
 
 import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql, desc } from "drizzle-orm";
 import { db } from "./db";
-import { users, sessions, personalAccessTokens, sshKeys } from "./schema";
+import { users, sessions, personalAccessTokens, sshKeys, auditLog, type AuditAction } from "./schema";
 
 const SESSION_DAYS = 30;
 
@@ -257,4 +257,53 @@ export async function listSshKeys(userId: number): Promise<Array<{ id: number; t
 
 export async function deleteSshKey(userId: number, keyId: number): Promise<void> {
   await db.delete(sshKeys).where(and(eq(sshKeys.id, keyId), eq(sshKeys.userId, userId)));
+}
+
+// ---------- audit log ----------
+
+export interface AuditEntry {
+  actorId: number | null;
+  actorHandle: string | null;
+  action: AuditAction | string;
+  targetType?: string | null;
+  targetId?: string | null;
+  ip?: string | null;
+  data?: Record<string, unknown>;
+}
+
+/** Append an audit event. Never throws into the caller — audit failures are
+ * logged but must not fail the user-facing operation that triggered them. */
+export async function recordAudit(entry: AuditEntry): Promise<void> {
+  try {
+    await db.insert(auditLog).values({
+      actorId: entry.actorId,
+      actorHandle: entry.actorHandle,
+      action: entry.action,
+      targetType: entry.targetType ?? null,
+      targetId: entry.targetId ?? null,
+      ip: entry.ip ?? null,
+      data: entry.data ?? {},
+    });
+  } catch (err) {
+    console.error("[audit] failed to record:", entry.action, err);
+  }
+}
+
+/** Recent audit events, newest first (admin/observability surface). */
+export async function recentAudit(limit = 100) {
+  return db
+    .select({
+      id: auditLog.id,
+      actorId: auditLog.actorId,
+      actorHandle: auditLog.actorHandle,
+      action: auditLog.action,
+      targetType: auditLog.targetType,
+      targetId: auditLog.targetId,
+      ip: auditLog.ip,
+      data: auditLog.data,
+      createdAt: auditLog.createdAt,
+    })
+    .from(auditLog)
+    .orderBy(desc(auditLog.id))
+    .limit(limit);
 }

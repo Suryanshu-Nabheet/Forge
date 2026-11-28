@@ -334,3 +334,74 @@ describe("repo deletion removes the bare repo on disk", () => {
     expect((row.rows[0] as { n: number }).n).toBe(0);
   });
 });
+
+describe("audit log", () => {
+  it("records auth events and sensitive mutations with actor attribution", async () => {
+    // The suite has already: registered eva, created PATs, created+deleted
+    // a repo, approved a PR, merged a PR, created a webhook. All of those
+    // should have audit rows attributed to eva (or sam for the approval).
+    // Log eva in once so the login event is exercised too.
+    const login = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "eva@corp.dev", password: "longpassword1" }),
+    });
+    expect(login.ok).toBe(true);
+    const r = await db.query(`
+      SELECT action, actor_handle, target_type, target_id FROM audit_log ORDER BY id
+    `);
+    const rows = r.rows as Array<{ action: string; actor_handle: string | null; target_type: string | null; target_id: string | null }>;
+    const actions = rows.map((x) => x.action);
+
+    expect(actions).toContain("auth.register");
+    expect(actions).toContain("auth.login");
+    expect(actions).toContain("pat.create");
+    expect(actions).toContain("repo.create");
+    expect(actions).toContain("repo.delete");
+    expect(actions).toContain("pr.approve");
+    expect(actions).toContain("pr.merge");
+    expect(actions).toContain("webhook.create");
+
+    // Attribution: every row from this suite has an actor handle.
+    for (const row of rows) {
+      expect(row.actor_handle).toBeTruthy();
+    }
+
+    // The merge row points at the right PR.
+    const mergeRow = rows.find((x) => x.action === "pr.merge");
+    expect(mergeRow!.target_id).toMatch(/corp\/widget#1$/);
+
+    // The audit API scopes to the caller: register a third user with no
+    // history and confirm they see nothing.
+    const reg3 = await fetch(`${BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "zed@corp.dev", name: "Zed Three", handle: "zed", password: "longpassword1" }),
+    });
+    const zedCookie = (reg3.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const auditRes = await fetch(`${BASE}/api/audit`, { headers: { cookie: zedCookie } });
+    const auditBody = (await auditRes.json()) as { audit: Array<{ action: string }> };
+    expect(auditRes.ok).toBe(true);
+    // Zed sees only his own registration — nothing from eva or sam.
+    const zedActions = auditBody.audit.map((x) => x.action);
+    expect(zedActions).toEqual(["auth.register"]);
+  });
+
+  it("records failed logins and lockouts for anonymous attackers", async () => {
+    // 6 bad logins: 5 record failures, the 6th hits the rate limit.
+    for (let i = 0; i < 6; i++) {
+      await fetch(`${BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "nobody@corp.dev", password: "wrong" }),
+      });
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    const r = await db.query(
+      `SELECT action FROM audit_log WHERE action LIKE 'auth.login%' AND actor_handle = 'nobody@corp.dev' ORDER BY id`,
+    );
+    const actions = (r.rows as Array<{ action: string }>).map((x) => x.action);
+    expect(actions.filter((a) => a === "auth.login_failed").length).toBeGreaterThanOrEqual(5);
+    expect(actions).toContain("auth.login_locked");
+  });
+});
