@@ -17,8 +17,10 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **PR approvals** | Approve / request changes in the PR page. Merging into a protected branch requires ≥1 approval from a non-author and zero outstanding change requests. |
 | **Org membership** | Private repos are readable/writable only by org members and owners, enforced across pages, API routes, git transport, search, and SSE. |
 | **PAT revocation** | Tokens and SSH keys can be revoked from Settings; revoked PATs are rejected immediately. |
+| **Two-factor auth** | TOTP (RFC 6238) with any authenticator app; secrets AES-256-GCM encrypted at rest; 8 single-use recovery codes (sha256-hashed); login is two-stage — password alone never yields a session on a 2FA account. |
+| **Audit log** | Append-only trail of sensitive actions (logins and failures, lockouts, PAT/SSH-key lifecycle, repo create/delete, org membership changes, merges, approvals, settings/webhook changes, 2FA enable/disable) with actor, target, and IP. `GET /api/audit` returns the caller's own events. |
 | **Notifications** | Per-user inbox of activity across your orgs with an unread badge; deep links to the PR or intent. |
-| **Login rate limiting** | 5 failed attempts per email+IP per minute → 429 with Retry-After. |
+| **Login rate limiting** | 5 failed attempts per email+IP per minute → 429 with Retry-After; covers both password and 2FA-code stages. |
 | **Semantic code search & Q&A** | Pushes trigger indexing: files are chunked (symbol-aware for code, heading-aware for prose) and embedded. `/search` does global semantic search; the repo "Ask AI" page answers natural-language questions with file:line citations. |
 | **Spec-to-PR workflow** | "Draft implementation plan" generates a structured plan (files to create/modify, steps, acceptance criteria). "Create branch scaffold" pushes a spec branch with a committed `docs/intents/*.md`. |
 | **Ephemeral previews** | Every PR push attempts a containerized build when Docker is available (non-root, no network, read-only source, resource limits, lifecycle scripts disabled during install). If Docker is unavailable, repository code is not executed on the Forge host and the preview is marked unavailable. Repository Dockerfiles are currently rejected because building them through the host Docker daemon is unsafe. Build logs stream into the PR page. |
@@ -63,7 +65,7 @@ Sign in to the web UI with **ada@acme.dev / password123** (or register your own 
 
 ```bash
 pnpm typecheck        # tsc across all packages + apps
-pnpm test             # 83 tests across 6 suites: engine units (diff parser, heuristic
+pnpm test             # 94 tests across 7 suites: engine units (diff parser, heuristic
                       #  review, embedder, scanner), queue claim semantics, sandbox
                       #  builds (success + malicious-script blocking), auth flows
                       #  (register/login/logout/401s/session scoping), UI rendering
@@ -72,9 +74,12 @@ pnpm test             # 83 tests across 6 suites: engine units (diff parser, heu
                       #  auth rejection, squash merge, Q&A citations, intent
                       #  lifecycle), the security suite (private-repo gating,
                       #  org membership, branch protection, PAT revocation,
-                      #  hook auth, brute-force lockout), and the new-features suite
+                      #  hook auth, brute-force lockout), the new-features suite
                       #  (star/watch/fork, commit + compare pages, SSH transport
-                      #  clone/push/auth rejection, webhook delivery + HMAC)
+                      #  clone/push/auth rejection, webhook delivery + HMAC), and
+                      #  the enterprise suite (rebase merge, plan/scaffold pipeline,
+                      #  webhook failure delivery, queue reaper, repo deletion on
+                      #  disk, audit log, TOTP 2FA incl. recovery codes)
 pnpm --filter @forge/web exec next build   # production build
 pnpm worker           # standalone worker process (optional; dev runs one in-process)
 pnpm db:push          # apply Drizzle schema
@@ -93,6 +98,7 @@ FORGE_SSH_PORT=2222                                  # git-over-SSH port (0 disa
 FORGE_SSH_HOST_KEY=path/to/key                       # SSH host key (auto-generated ed25519 on first boot)
 ANTHROPIC_API_KEY=...                                # Claude review/QA/plans (else deterministic heuristics)
 FORGE_HOOK_TOKEN=...                                 # shared secret for git hook callbacks (auto-generated)
+FORGE_SECRET=...                                     # encryption key for TOTP secrets at rest (set for stable 2FA across restarts)
 ```
 
 ## Architecture

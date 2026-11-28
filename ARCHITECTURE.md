@@ -195,9 +195,11 @@ Every PR push triggers a preview build. Adapters, feature-detected at runtime:
 
 ## 8. Auth & sessions
 
-- Hand-rolled, dependency-light auth (deliberate: small auditable surface): scrypt password hashing, DB-backed sessions, `forge_session` httpOnly cookie.
-- **PATs**: generated in the UI, shown once, stored sha256-hashed. Git uses `http://user:token@host/git/…` (Basic); the API accepts `Authorization: Bearer <pat>`. Scopes: `repo:read`, `repo:write`.
+- Hand-rolled, dependency-light auth (deliberate: small auditable surface): versioned scrypt password hashing (N=2^15, parameters recorded in the hash string for future upgrades), DB-backed sessions (sha256-hashed tokens at rest), `forge_session` httpOnly cookie.
+- **PATs**: generated in the UI, shown once, stored sha256-hashed, optionally expiring (`expiresAt`), soft-revoked (`revokedAt`) and rejected immediately after.
 - **SSH keys**: managed + revocable in UI (title, fingerprint, publicKey) — these authenticate the SSH git transport (public-key blob match + signature verification); HTTP with PATs is the other transport.
+- **2FA (TOTP, RFC 6238)**: dependency-light implementation in `@forge/db` (`totp.ts`) — HMAC-SHA1 via node:crypto, hand-rolled base32, ±1 period skew window, timing-safe compare. Secrets are AES-256-GCM encrypted at rest under a key derived from `FORGE_SECRET` (set it in production; without it the per-process hook token is used, which means secrets must be re-enrolled after a restart). Login is two-stage: a valid password on a 2FA account returns `{ totpRequired: true }` without a session; the client re-submits with a 6-digit code or a single-use recovery code (8 issued at enrollment, sha256-hashed at rest). Failed code attempts count against the same brute-force limiter and are audited.
+- **Audit log**: append-only `audit_log` table (actor, action, target, best-effort IP, structured data; never secrets). Writers are wired into auth events, PAT/SSH-key lifecycle, repo create/delete, org membership, PR merge/approvals, settings and webhook changes, and 2FA enable/disable. `recordAudit` never throws into the caller. `GET /api/audit` returns the caller's own events.
 
 ## 9. UI structure (Next.js App Router)
 
@@ -238,11 +240,12 @@ secret shown once, delivery log, delete).
 ## 12. Testing & verification
 
 - `pnpm typecheck` — tsc across the monorepo
-- `pnpm test` — 83 Vitest tests across 6 suites, all booting real servers and driving real git where relevant:
+- `pnpm test` — 94 Vitest tests across 7 suites, all booting real servers and driving real git where relevant:
   - **unit-engines**: diff parser (line anchors, add/remove/rename), deterministic heuristic review (secrets/eval/missing tests/risk), local embedder (unit vectors, similarity ordering, determinism), lifecycle-script prescan
   - **unit-queue-sse**: SKIP-LOCKED claim exclusivity, retry-until-max-attempts, sandbox host-execution refusal, `curl|sh` postinstall blocking, `git archive` extraction fidelity
   - **e2e-git-flow**: register→PAT, repo create, empty-repo clone → first push, intent API, `i1-*` branch push → auto-PR, manual PR open + duplicate 409 + no-diff 400, AI review comments, preview build, anonymous push rejected (no keychain replay), squash merge, semantic index + Q&A citations
   - **e2e-auth-issues**: anonymous 401s, register/login/logout, weak-password rejection, session-scoped keys/PATs, UI page rendering (dashboard/org/repo/file view), PR close/reopen → intent status sync, human comments, merge → intent done
   - **e2e-security**: private-repo page gating (anon + non-member), search leakage, org takeover 403, forged hook-token 403, webhook private-target rejection, SSE session required, PAT create→use→revoke→rejected, SSH key delete, member promotion grants access, branch protection (direct push/force-push/deletion rejected, unprotected allowed, owner settings API), login brute-force lockout (429 + Retry-After)
   - **e2e-new-features**: star/watch toggles + counts + 401s, fork mirrors git data with lineage + collision suffixing, commits list/detail/compare pages, SSH transport (clone, push→DB sync, unknown-key rejection, private-repo ACL), webhooks (ping/push HMAC signatures, delivery log, non-http rejection, delete stops delivery)
+  - **e2e-enterprise**: rebase merge through the protected-branch approval gate, intent plan/scaffold pipeline incl. idempotency and branch DB sync, webhook failure delivery recording, queue-reaper recovery of stale-active jobs, repo deletion removing the on-disk bare repo, audit-log coverage and scoping, and the full TOTP 2FA cycle (enroll, challenged login, wrong-code rejection, recovery-code single use, disable)
 - `pnpm typecheck` / `pnpm test` / `pnpm build` — quality gates before "done" (no ESLint config yet)
