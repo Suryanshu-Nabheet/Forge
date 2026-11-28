@@ -23,6 +23,9 @@ export type SsePublishFn = (channel: string, event: string, data: unknown) => vo
 
 let ssePublish: SsePublishFn = () => {};
 
+// Track in-flight job completions so shutdown can drain them.
+const inFlightJobs = new Set<Promise<void>>();
+
 export async function startWorker(publish?: SsePublishFn): Promise<void> {
   if (running) return;
   if (publish) ssePublish = publish;
@@ -31,8 +34,19 @@ export async function startWorker(publish?: SsePublishFn): Promise<void> {
   void pollLoop();
 }
 
-export async function stopWorker(): Promise<void> {
-  running = false;
+/**
+ * Stop claiming and wait for in-flight jobs to finish (bounded by timeoutMs).
+ * Jobs still running after the timeout are left 'active' — the reaper
+ * requeues them for another worker once the grace period passes.
+ */
+export async function stopWorker(timeoutMs = 30_000): Promise<void> {
+  running = false; // poll loop exits; no new claims
+  if (inFlightJobs.size === 0) return;
+  console.log(`[worker:${WORKER_ID}] draining ${inFlightJobs.size} in-flight job(s)…`);
+  const drained = Promise.allSettled([...inFlightJobs]);
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+  await Promise.race([drained, timeout]);
+  console.log(`[worker:${WORKER_ID}] drain complete (${inFlightJobs.size} remaining, if any)`);
 }
 
 async function pollLoop(): Promise<void> {
@@ -122,13 +136,15 @@ async function claimJobs(): Promise<ClaimedJob[]> {
   const rows = (claimed.rows ?? []) as unknown as ClaimedJob[];
   for (const job of rows) {
     inFlight++;
-    void runJob(job)
+    const completion = runJob(job)
       .catch((err) => {
         console.error(`[worker] job ${job.id} crashed:`, err);
       })
       .finally(() => {
         inFlight--;
+        inFlightJobs.delete(completion);
       });
+    inFlightJobs.add(completion);
   }
   return rows;
 }

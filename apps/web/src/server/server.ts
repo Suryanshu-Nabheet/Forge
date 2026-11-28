@@ -119,13 +119,22 @@ async function main() {
     await startWorker(ssePublish);
   });
 
-  const shutdown = async () => {
-    console.log("[forge] shutting down…");
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[forge] ${signal} received — draining…`);
     server.close();
+    // Stop accepting new connections, then let in-flight jobs finish
+    // (bounded); anything still running is requeued by the reaper later.
+    try {
+      const { stopWorker } = await import("@forge/jobs");
+      await stopWorker(20_000);
+    } catch { /* worker not started */ }
     process.exit(0);
   };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
 function safeTokenEqual(presented: string, expected: string): boolean {
