@@ -62,4 +62,5 @@ export type AuditAction =
   | "2fa.disable"
   | "intent.edit"
   | "intent.status_update"
-  | "release.create";
+  | "release.create"
+  | "branch.delete";

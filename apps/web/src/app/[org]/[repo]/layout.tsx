@@ -53,6 +53,7 @@ export default async function RepoLayout({
         <nav className="flex gap-1 mt-3 text-[13px]">
           <RepoTab org={org} repo={repo} tab="">Code</RepoTab>
           <RepoTab org={org} repo={repo} tab="commits">Commits</RepoTab>
+          <RepoTab org={org} repo={repo} tab="branches">Branches</RepoTab>
           <RepoTab org={org} repo={repo} tab="pulls">Pull requests</RepoTab>
           <RepoTab org={org} repo={repo} tab="releases">Releases</RepoTab>
           <RepoTab org={org} repo={repo} tab="issues">Intents</RepoTab>

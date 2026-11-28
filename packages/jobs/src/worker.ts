@@ -172,14 +172,28 @@ async function runJob(job: Job): Promise<void> {
   // the run can be scoped for SSE authz and per-PR log lookups.
   const repoId = typeof payload.repoId === "number" ? payload.repoId : null;
   const prId = typeof payload.prId === "number" ? payload.prId : null;
-  const [run] = await db.insert(jobRuns).values({
-    jobQueueId: id,
-    type: queue as never,
-    repoId,
-    prId,
-    payload,
-    status: "running",
-  }).returning({ id: jobRuns.id });
+  // The repo/PR may have been deleted between enqueue and run — the FK
+  // would crash the job. Insert without them first when they're stale.
+  let run: { id: number } | undefined;
+  try {
+    [run] = await db.insert(jobRuns).values({
+      jobQueueId: id,
+      type: queue as never,
+      repoId,
+      prId,
+      payload,
+      status: "running",
+    }).returning({ id: jobRuns.id });
+  } catch {
+    [run] = await db.insert(jobRuns).values({
+      jobQueueId: id,
+      type: queue as never,
+      repoId: null,
+      prId: null,
+      payload,
+      status: "running",
+    }).returning({ id: jobRuns.id });
+  }
   if (!run) throw new Error("job run insert failed");
   const runId = run.id;
 

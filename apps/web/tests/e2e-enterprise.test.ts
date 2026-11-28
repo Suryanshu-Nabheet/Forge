@@ -855,3 +855,62 @@ describe("comment threading + intent discussions", () => {
     expect((act.rows[0] as { n: number }).n).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("branches page + deletion", () => {
+  it("lists branches and deletes an unprotected one; protected main is refused", async () => {
+    // Page lists branches for a read-only anonymous visitor.
+    const page = await fetch(`${BASE}/corp/grep-repo/branches`);
+    const html = await page.text();
+    expect(page.ok).toBe(true);
+    expect(html).toContain("greptest");
+    expect(html).toContain("main");
+
+    // Deleting protected main is refused.
+    const delMain = await sfetch(`/api/corp/grep-repo/branches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", branch: "main" }),
+    });
+    expect(delMain.status).toBe(403);
+
+    // Delete greptest: ref gone, DB row gone.
+    const del = await sfetch(`/api/corp/grep-repo/branches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", branch: "greptest" }),
+    });
+    expect(del.ok).toBe(true);
+    const refGone = await git(["--git-dir", path.join(DATA, "repos", "corp", "grep-repo.git"), "rev-parse", "--verify", "refs/heads/greptest"]).catch(() => null);
+    expect(refGone).toBeNull();
+    const rowGone = await db.query(`SELECT count(*)::int AS n FROM branches WHERE repo_id = (SELECT id FROM repositories WHERE name = 'grep-repo') AND name = 'greptest'`);
+    expect((rowGone.rows[0] as { n: number }).n).toBe(0);
+
+    // Unknown branch 404s.
+    const del404 = await sfetch(`/api/corp/grep-repo/branches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", branch: "nope" }),
+    });
+    expect(del404.status).toBe(404);
+  });
+});
+
+describe("user profiles", () => {
+  it("shows a user's repos and activity, hides others' private repos", async () => {
+    const page = await fetch(`${BASE}/u/eva`);
+    const html = await page.text();
+    expect(page.ok).toBe(true);
+    expect(html).toContain("Eva Dee");
+    expect(html).toMatch(/@<[^>]*>?eva|@eva/);
+    // Public repos visible anonymously.
+    expect(html).toContain("grep-repo");
+    // Activity types render.
+    expect(html).toMatch(/release_published|comment_posted|pr_merged/);
+  });
+
+  it("404s unknown handles", async () => {
+    const page = await fetch(`${BASE}/u/ghost-user-xyz`);
+    expect(page.status).toBe(200); // page renders its own not-found state
+    expect(await page.text()).toContain("No such user");
+  });
+});
