@@ -1003,3 +1003,66 @@ describe("reviewer inbox queue", () => {
     expect(body.unread).toBeGreaterThan(0);
   });
 });
+
+describe("Fixes #n auto-close", () => {
+  it("closes the referenced intent when a PR titled 'Fixes #n' merges", async () => {
+    // Create the target intent in widget (protected main needs an approval — reuse sam).
+    const create = await sfetch(`/api/corp/widget/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Widget bug to fix", description: "fixes nothing yet" }),
+    });
+    const issue = (await create.json()) as { number: number };
+    expect(create.ok).toBe(true);
+
+    // Branch + PR titled "Fixes #<n>".
+    const pat = await sfetch(`/api/pats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "t7", scopes: ["repo:read", "repo:write"] }),
+    });
+    const patBody = (await pat.json()) as { token: string };
+    const pushUrl = `http://eva:${patBody.token}@localhost:${PORT}/git/corp/widget.git`;
+    await git(["-C", work, "fetch", "--quiet", pushUrl, "+refs/heads/main:refs/heads/main"]);
+    await git(["-C", work, "checkout", "--quiet", "-f", "main"]);
+    await git(["-C", work, "checkout", "--quiet", "-b", "fixes-referenced"]);
+    await exec("bash", ["-c", `cd ${work} && printf 'fix content\\n' > fix.txt && git add . && git -c user.name=Eva -c user.email=eva@corp.dev commit --quiet -m "fix it"`]);
+    await git(["-C", work, "push", "--quiet", pushUrl, "HEAD:refs/heads/fixes-referenced"]);
+
+    const pr = await sfetch(`/api/corp/widget/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: `Fixes #${issue.number}`, head: "fixes-referenced", base: "main" }),
+    });
+    const prBody = (await pr.json()) as { number: number };
+    expect(pr.ok).toBe(true);
+
+    // Approve as sam (non-author) to satisfy the protected-branch gate.
+    const samLogin = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "sam@corp.dev", password: "longpassword1" }),
+    });
+    const samCookie = (samLogin.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const approve = await fetch(`${BASE}/api/corp/widget/pulls/${prBody.number}/approvals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: samCookie },
+      body: JSON.stringify({ state: "approved" }),
+    });
+    expect(approve.ok).toBe(true);
+
+    const merge = await sfetch(`/corp/widget/pulls/${prBody.number}/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy: "squash" }),
+    });
+    expect(merge.ok).toBe(true);
+
+    // The referenced intent is now done.
+    const row = (await db.query(
+      `SELECT status FROM intents WHERE number = $1 AND repo_id = (SELECT id FROM repositories WHERE name = 'widget')`,
+      [issue.number],
+    )).rows[0] as { status: string };
+    expect(row.status).toBe("done");
+  });
+});

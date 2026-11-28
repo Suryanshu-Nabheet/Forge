@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { requireWritableRepo } from "@/server/authz";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -108,6 +108,37 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     // Close the loop: merged PR → its intent is done.
     if (pr.intentId) {
       await db.update(intents).set({ status: "done", updatedAt: new Date() }).where(eq(intents.id, pr.intentId));
+    }
+
+    // "Fixes #n" auto-close: GitHub-style closing keywords in the PR
+    // title or description resolve to open intents of this repo and are
+    // marked done when the merge lands. Unknown/self references are
+    // ignored silently.
+    const closingKeywords = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?|implements|fulfills?)\s+#(\d+)\b/gi;
+    const closingText = `${pr.title}\n${pr.description ?? ""}`;
+    const closedNumbers = new Set<number>();
+    for (const m of closingText.matchAll(closingKeywords)) {
+      const num = Number(m[1]);
+      if (num === pr.number || closedNumbers.has(num)) continue;
+      const target = (await db
+        .select({ id: intents.id })
+        .from(intents)
+        .where(and(
+          eq(intents.repoId, r.repoId),
+          eq(intents.number, num),
+          sql`${intents.status} NOT IN ('done','closed')`,
+        ))
+        .limit(1))[0];
+      if (target) {
+        await db.update(intents).set({ status: "done", updatedAt: new Date(), closedAt: new Date() }).where(eq(intents.id, target.id));
+        await db.insert(activities).values({
+          repoId: r.repoId,
+          userId: user.id,
+          type: "intent_closed",
+          data: { title: `#${num} via PR #${pr.number}`, number: num },
+        });
+        closedNumbers.add(num);
+      }
     }
 
     // pr_merged webhook — never blocks the merge response.
