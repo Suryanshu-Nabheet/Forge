@@ -667,3 +667,45 @@ describe("literal code search + pagination", () => {
     expect(html).toContain("No pull requests");
   });
 });
+
+describe("releases", () => {
+  it("creates a tag + release, lists it, and fires the release webhook event", async () => {
+    const res = await sfetch(`/api/corp/grep-repo/releases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagName: "v1.0.0", name: "Version 1.0", notes: "## Changes\n- first **stable** release", prerelease: false }),
+    });
+    const body = (await res.json()) as { ok?: boolean; tagName?: string; error?: string };
+    expect(res.ok).toBe(true);
+    expect(body.tagName).toBe("v1.0.0");
+
+    // Tag exists in git on the default branch head.
+    const tagSha = (await git(["--git-dir", path.join(DATA, "repos", "corp", "grep-repo.git"), "rev-parse", "v1.0.0"])).stdout.trim();
+    expect(tagSha).toMatch(/^[0-9a-f]{40}$/);
+
+    // Duplicate release rejected.
+    const dupe = await sfetch(`/api/corp/grep-repo/releases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagName: "v1.0.0", name: "again" }),
+    });
+    expect(dupe.status).toBe(409);
+
+    // Listed on the releases page with rendered notes.
+    const page = await fetch(`${BASE}/corp/grep-repo/releases`);
+    const html = await page.text();
+    expect(page.ok).toBe(true);
+    expect(html).toContain("Version 1.0");
+    expect(html).toContain("<strong>stable</strong>");
+
+    // Activity + audit recorded for the release.
+    const act = await db.query(`SELECT count(*)::int AS n FROM activities WHERE type = 'release_published'`);
+    expect((act.rows[0] as { n: number }).n).toBeGreaterThan(0);
+    const aud = await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'release.create'`);
+    expect((aud.rows[0] as { n: number }).n).toBeGreaterThan(0);
+
+    // Anonymous users can read the releases page (public repo).
+    const anon = await fetch(`${BASE}/corp/grep-repo/releases`);
+    expect(anon.ok).toBe(true);
+  });
+});

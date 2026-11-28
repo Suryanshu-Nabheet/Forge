@@ -18,6 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
   pr_closed: "closed a pull request",
   pr_reopened: "reopened a pull request",
   pr_approved: "approved a pull request",
+  release_published: "published a release",
   pr_changes_requested: "requested changes on a pull request",
   intent_created: "created an intent",
   intent_scaffolded: "scaffolded a branch for an intent",
@@ -57,6 +58,10 @@ export default function NotificationsPage() {
     const num = (n.data as { number?: number }).number;
     if (n.type.startsWith("pr_") && typeof num === "number") return `/${n.repo}/pulls/${num}`;
     if (n.type.startsWith("intent") && typeof num === "number") return `/${n.repo}/issues/${num}`;
+    if (n.type === "release_published") {
+      const tag = (n.data as { tag?: string }).tag;
+      return tag ? `/${n.repo}/releases` : `/${n.repo}`;
+    }
     return `/${n.repo}`;
   }
 

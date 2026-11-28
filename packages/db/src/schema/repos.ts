@@ -161,3 +161,27 @@ export const forkedRepos = pgTable(
     index("forked_from_idx").on(t.forkedFromRepoId),
   ],
 );
+
+// ---------- releases ----------
+
+export const releases = pgTable(
+  "releases",
+  {
+    id: serial("id").primaryKey(),
+    repoId: integer("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    tagName: text("tag_name").notNull(),
+    targetSha: text("target_sha").notNull(),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    isDraft: boolean("is_draft").notNull().default(false),
+    isPrerelease: boolean("is_prerelease").notNull().default(false),
+    authorId: integer("author_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("releases_repo_tag_idx").on(t.repoId, t.tagName),
+    index("releases_repo_idx").on(t.repoId, t.id),
+  ],
+);

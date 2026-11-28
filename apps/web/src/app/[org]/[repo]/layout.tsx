@@ -54,6 +54,7 @@ export default async function RepoLayout({
           <RepoTab org={org} repo={repo} tab="">Code</RepoTab>
           <RepoTab org={org} repo={repo} tab="commits">Commits</RepoTab>
           <RepoTab org={org} repo={repo} tab="pulls">Pull requests</RepoTab>
+          <RepoTab org={org} repo={repo} tab="releases">Releases</RepoTab>
           <RepoTab org={org} repo={repo} tab="issues">Intents</RepoTab>
           <RepoTab org={org} repo={repo} tab="ask">Ask AI</RepoTab>
           <RepoTab org={org} repo={repo} tab="settings">Settings</RepoTab>

@@ -9,7 +9,7 @@ export type JobType = "semantic_index" | "pr_review" | "qa_answer" | "intent_pla
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export type PreviewStatus = "queued" | "building" | "running" | "failed" | "exited";
 export type CommentKind = "ai_review" | "ai_plan" | "human";
-export type WebhookEventName = "push" | "pull_request" | "pr_merged" | "ping";
+export type WebhookEventName = "push" | "pull_request" | "pr_merged" | "ping" | "release";
 
 // ---------- Git ----------
 export interface GitRefUpdate {
@@ -213,4 +213,5 @@ export interface WebhookPayload {
   ref?: string;
   commits?: Array<{ sha: string; message: string; author: string }>;
   pullRequest?: { number: number; title: string; base: string; head: string; status: PrStatus };
+  release?: { tag: string; name: string; targetSha: string };
 }

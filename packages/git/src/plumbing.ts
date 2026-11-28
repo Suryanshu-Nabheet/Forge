@@ -310,3 +310,11 @@ export async function grepTree(
   }
   return matches;
 }
+
+/** Create an annotated tag on a bare repo, pointing at targetSha. */
+export async function createTag(gitDir: string, name: string, targetSha: string, message: string, tagger: { name: string; email: string }): Promise<void> {
+  await gitIn(gitDir, [
+    "-c", `user.name=${tagger.name}`, "-c", `user.email=${tagger.email}`,
+    "tag", "-a", name, "-m", message, targetSha,
+  ]);
+}
