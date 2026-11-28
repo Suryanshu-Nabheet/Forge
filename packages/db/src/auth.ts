@@ -103,12 +103,6 @@ export async function destroySession(token: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.token, sha256Hex(token)));
 }
 
-/** Delete expired session rows; returns rows removed. Safe to call periodically. */
-export async function purgeExpiredSessions(): Promise<number> {
-  const res = await db.delete(sessions).where(lt(sessions.expiresAt, new Date())).returning({ id: sessions.token });
-  return res.length;
-}
-
 export async function registerUser(email: string, name: string, handle: string, password: string): Promise<AuthUser> {
   const passwordHash = hashPassword(password);
   const [row] = await db
