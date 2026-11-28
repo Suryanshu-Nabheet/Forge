@@ -12,8 +12,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { repositories } from "./repos";
 
-export type WebhookEvent = "push" | "pull_request" | "pr_merged" | "ping";
-
 export const webhooks = pgTable(
   "webhooks",
   {

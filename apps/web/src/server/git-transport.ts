@@ -1,5 +1,5 @@
 // Git smart HTTP transport: bridges /git/* to `git http-backend` (CGI).
-// Handles Basic auth (PAT) + session-cookie auth, enforces repo scopes.
+// Handles Basic auth (PAT), enforces repo scopes and org-membership policy.
 
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";

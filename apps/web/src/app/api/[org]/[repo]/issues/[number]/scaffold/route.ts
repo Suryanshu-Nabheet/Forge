@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, organizations, repositories, intents, intentLinks, activities, branches } from "@forge/db";
+import { db, intents, intentLinks, activities, branches } from "@forge/db";
 import { repoGitDir } from "@forge/git";
 
 const exec = promisify(execFile);

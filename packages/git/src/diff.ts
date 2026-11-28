@@ -12,13 +12,6 @@ const OLD_MODE_RE = /^old mode (\d+)$/;
 const NEW_MODE_RE = /^new mode (\d+)$/;
 const BINARY_RE = /^Binary files .* differ$/;
 
-function statusOf(header: { oldPath?: string | null; newPath?: string | null; rename?: string }): DiffFile["status"] {
-  if (header.rename) return "renamed";
-  if (header.oldPath === null && header.newPath) return "added";
-  if (header.newPath === null && header.oldPath) return "removed";
-  return "modified";
-}
-
 /**
  * Build a structured diff between base and head (three-dot: merge-base).
  * Uses `--find-renames` for rename detection.
@@ -39,14 +32,6 @@ export async function diffRevs(gitDir: string, baseRev: string, headRev: string)
 }
 
 /** Diff a single file across base..head (used for inline comment anchoring). */
-export async function diffFileCommits(gitDir: string, base: string, head: string, filePath: string): Promise<DiffFile | null> {
-  const out = await gitIn(gitDir, [
-    "diff", "--find-renames", "--no-color", `${base}...${head}`, "--", filePath,
-  ]);
-  const files = parseUnifiedDiff(out);
-  return files[0] ?? null;
-}
-
 /** Commit diff against its first parent (single-commit view). */
 export async function diffCommit(gitDir: string, sha: string): Promise<DiffFile[]> {
   const out = await gitIn(gitDir, [
@@ -168,25 +153,4 @@ export function parseUnifiedDiff(out: string): DiffFile[] {
   }
   pushFile();
   return files;
-}
-
-/**
- * Map a comment anchor (path + line + side) to the diff so comments render inline.
- * Returns the hunk-relative coordinates for a line on the given side.
- */
-export function locateAnchor(files: DiffFile[], path: string, line: number, side: "old" | "new"): { file: DiffFile; hunk: DiffHunk; index: number } | null {
-  const file = files.find((f) => f.newPath === path || f.oldPath === path);
-  if (!file) return null;
-  for (const hunk of file.hunks) {
-    for (let i = 0; i < hunk.lines.length; i++) {
-      const dl = hunk.lines[i]!;
-      if (side === "new" && dl.newLine === line && dl.type !== "remove") {
-        return { file, hunk, index: i };
-      }
-      if (side === "old" && dl.oldLine === line && dl.type !== "add") {
-        return { file, hunk, index: i };
-      }
-    }
-  }
-  return null;
 }

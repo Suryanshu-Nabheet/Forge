@@ -199,9 +199,6 @@ importers:
       '@forge/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
-      '@forge/queue':
-        specifier: workspace:*
-        version: link:../../packages/queue
       '@forge/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
@@ -281,9 +278,6 @@ importers:
       '@forge/jobs':
         specifier: workspace:*
         version: link:../../packages/jobs
-      '@forge/queue':
-        specifier: workspace:*
-        version: link:../../packages/queue
       '@forge/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
@@ -375,19 +369,6 @@ importers:
       drizzle-orm:
         specifier: ^0.44.7
         version: 0.44.7(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.5
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  packages/queue:
-    dependencies:
-      '@forge/shared':
-        specifier: workspace:*
-        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: ^22

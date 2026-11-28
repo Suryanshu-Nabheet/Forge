@@ -10,7 +10,7 @@ interface Social {
   watching: boolean;
 }
 
-/** Star / Watch / Fork buttons on the repo header. Optimistic UI. */
+/** Star / Watch / Fork buttons on the repo header, with live counts. */
 export function RepoSocialButtons({ org, repo, social, signedIn, forkedFrom }: {
   org: string;
   repo: string;
@@ -86,7 +86,7 @@ export function RepoSocialButtons({ org, repo, social, signedIn, forkedFrom }: {
         onClick={() => void toggle("watch")}
         title={state.watching ? "Unwatch" : "Watch"}
       >
-        <span>{state.watching ? "👁" : "👁"}</span>
+        <span>{state.watching ? "👁" : "○"}</span>
         {state.watching ? "Watching" : "Watch"}
         <span className="mono text-[10px] text-[var(--text-faint)] border border-[var(--border-strong)] rounded-full px-1.5">
           {state.watchers}

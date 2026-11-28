@@ -59,10 +59,6 @@ origin/                         # repo root, pnpm workspace + turborepo
 │   │       ├── plumbing.ts    # typed wrappers: cat-file, ls-tree, rev-list…
 │   │       ├── diff.ts        # unified diff → structured hunks
 │   │       └── archive.ts     # git archive extraction for sandboxes
-│   ├── queue/                # job queue abstraction
-│   │   └── src/
-│   │       ├── index.ts       # interface + feature detection
-│   │       └── index.ts       # SKIP-LOCKED claim + backoff (Postgres only; no Redis adapter)
 │   └── sandbox/               # ephemeral preview runner
 │       └── src/
 │           ├── index.ts       # adapter selection (docker | process)
@@ -172,9 +168,9 @@ pgvector is not available on this machine (Homebrew Postgres 17 without the exte
 
 Intent page → "Draft Implementation Plan" → queued AI plan job → structured plan (overview, files to create/modify, steps, acceptance criteria, risks) saved to `intents.aiState.plan`. "Create scaffold" creates branch `i{n}-{slug}` with `INTENT.md` committed via the Git engine, linking intent ↔ branch ↔ later PR through `intent_links`.
 
-## 6. Background queue (`packages/queue`)
+## 6. Background queue (`job_queue` via `packages/jobs` worker)
 
-Postgres-backed queue: `job_queue` table, atomic claim via a single `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` statement, 500ms polling, exponential-backoff retries, and a reaper that requeues jobs left `active` by a dead worker (>10 min).
+Postgres-backed queue: `job_queue` table, atomic claim via a single `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` statement, 500ms polling, exponential-backoff retries, bounded in-flight concurrency (8), and a reaper that requeues jobs left `active` by a dead worker (>10 min).
 
 Job types: `semantic_index`, `pr_review`, `qa_answer`, `intent_plan`, `preview_build`. Every job writes log lines to `job_events` (streamed to the UI over SSE) and a `job_runs` row for status.
 

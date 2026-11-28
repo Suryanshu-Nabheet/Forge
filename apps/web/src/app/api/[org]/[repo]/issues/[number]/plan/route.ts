@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { requireWritableRepo } from "@/server/authz";
 import { and, eq } from "drizzle-orm";
-import { db, organizations, repositories, intents } from "@forge/db";
+import { db, intents } from "@forge/db";
 import { enqueue } from "@forge/jobs";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {

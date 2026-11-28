@@ -2,7 +2,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, writeFile, access, constants } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -51,15 +51,6 @@ export function repoGitDir(orgSlug: string, repoName: string): string {
   if (!/^[a-z0-9][a-z0-9-]{0,38}$/.test(orgSlug)) throw new Error(`invalid org slug: ${orgSlug}`);
   if (!/^[a-z0-9][a-z0-9_.-]{0,99}$/.test(repoName)) throw new Error(`invalid repo name: ${repoName}`);
   return path.join(reposRoot(), orgSlug, `${repoName}.git`);
-}
-
-export async function repoExists(orgSlug: string, repoName: string): Promise<boolean> {
-  try {
-    await access(repoGitDir(orgSlug, repoName), constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 const POST_RECEIVE_HOOK = [

@@ -19,7 +19,6 @@
     "@forge/db": "workspace:*",
     "@forge/git": "workspace:*",
     "@forge/jobs": "workspace:*",
-    "@forge/queue": "workspace:*",
     "@forge/sandbox": "workspace:*",
     "@forge/shared": "workspace:*",
     "clsx": "^2.1.1",

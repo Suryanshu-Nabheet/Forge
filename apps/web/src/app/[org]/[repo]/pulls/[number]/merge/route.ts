@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, organizations, repositories, pullRequests, branches, activities, intents, prApprovals } from "@forge/db";
+import { db, repositories, pullRequests, branches, activities, intents, prApprovals } from "@forge/db";
 import { repoGitDir, revParse } from "@forge/git";
 import { dispatchWebhookEvent } from "@forge/jobs";
 

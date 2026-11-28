@@ -111,16 +111,6 @@ export function signPayload(secret: string, body: string): string {
 }
 
 /** Constant-time signature verification (for tests / receivers). */
-export function verifySignature(secret: string, body: string, signature: string): boolean {
-  const expected = Buffer.from(signPayload(secret, body));
-  let presented: Buffer;
-  try {
-    presented = Buffer.from(signature);
-  } catch {
-    return false;
-  }
-  return presented.length === expected.length && timingSafeEqual(presented, expected);
-}
 
 /**
  * Enqueue + deliver a webhook event to every matching, active hook on a repo.

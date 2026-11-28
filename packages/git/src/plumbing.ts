@@ -133,14 +133,6 @@ export async function revListCommits(gitDir: string, range: string, limit?: numb
   return parseRevList(out, false);
 }
 
-export async function revListShas(gitDir: string, range: string, limit?: number): Promise<string[]> {
-  const out = await gitIn(gitDir, [
-    "rev-list", range,
-    ...(limit ? ["--max-count", String(limit)] : []),
-  ]);
-  return out.split("\n").map((l) => l.trim()).filter(Boolean);
-}
-
 export async function commitParents(gitDir: string, sha: string): Promise<string[]> {
   const out = await gitIn(gitDir, ["rev-list", "--parents", "-n", "1", sha]);
   return out.trim().split(/\s+/).slice(1);

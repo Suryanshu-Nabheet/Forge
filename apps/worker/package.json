@@ -13,7 +13,6 @@
     "@forge/db": "workspace:*",
     "@forge/git": "workspace:*",
     "@forge/jobs": "workspace:*",
-    "@forge/queue": "workspace:*",
     "@forge/sandbox": "workspace:*",
     "@forge/shared": "workspace:*",
     "tsx": "^4.20.0"

@@ -107,7 +107,6 @@ packages/db     Drizzle schema (24 tables), auth (scrypt sessions, PATs, SSH key
 packages/jobs   post-receive handler (ref sync, auto-PR, enqueue) + job processors + webhook delivery
 packages/ai     review engine (Claude + heuristic), embeddings, Q&A, plan generator
 packages/sandbox process + docker preview runners with prescan
-packages/queue  Postgres SKIP-LOCKED queue (reference claim implementation)
 packages/shared domain types shared end-to-end
 ```
 
