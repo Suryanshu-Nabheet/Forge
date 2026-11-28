@@ -118,6 +118,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     pullRequest: { number: pr.number, title: title || `Merge ${head} into ${base}`, base, head, status: "open" },
   }).catch(() => {});
 
+  // CODEOWNERS auto-assignment (best-effort, same as the auto-PR path).
+  try {
+    const { codeownersReviewers } = await import("@forge/jobs");
+    const { gitIn } = await import("@forge/git");
+    const paths = (await gitIn(gitDir, ["diff-tree", "--no-commit-id", "--name-only", "-r", baseSha ?? "HEAD", headSha]))
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    const handles = await codeownersReviewers(gitDir, headSha, paths);
+    if (handles.length > 0) {
+      const { users: userTable, prReviewRequests } = await import("@forge/db");
+      const { inArray } = await import("drizzle-orm");
+      const ownerRows = await db.select({ id: userTable.id }).from(userTable).where(inArray(userTable.handle, handles));
+      for (const o of ownerRows) {
+        if (o.id === user.id) continue;
+        await db.insert(prReviewRequests).values({ prId: pr.id, userId: o.id, source: "codeowners" }).onConflictDoNothing();
+      }
+    }
+  } catch { /* never block PR creation on assignment */ }
+
   // Enqueue review + preview like the intent auto-PR path does.
   const { enqueue } = await import("@forge/jobs");
   await enqueue("pr_review", { repoId: r.repoId, prId: pr.id });

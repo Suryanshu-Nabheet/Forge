@@ -20,6 +20,7 @@ const TYPE_LABELS: Record<string, string> = {
   pr_approved: "approved a pull request",
   release_published: "published a release",
   pr_changes_requested: "requested changes on a pull request",
+  review_requested: "requested a review",
   intent_created: "created an intent",
   intent_scaffolded: "scaffolded a branch for an intent",
   intent_closed: "closed an intent",

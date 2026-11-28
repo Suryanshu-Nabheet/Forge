@@ -1,8 +1,8 @@
 // post-receive hook handler: sync refs to DB, auto-open PRs, enqueue jobs.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@forge/db";
-import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, activities } from "@forge/db";
+import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, activities, users, prReviewRequests } from "@forge/db";
 import { repoGitDir, revParse, revListCommits, commitParents, commitStats } from "@forge/git";
 import { dispatchWebhookEvent } from "./webhooks";
 
@@ -178,6 +178,27 @@ async function syncBranch(
         if (!pr) throw new Error("pr creation failed");
         prId = pr.id;
         prNumber = pr.number;
+
+        // CODEOWNERS auto-assignment (best-effort; never fails the push).
+        try {
+          const { codeownersReviewers } = await import("./codeowners");
+          const changedPaths = await changedPathsBetween(gitDir, repoDefaultBranch, newSha);
+          const handles = await codeownersReviewers(gitDir, newSha, changedPaths);
+          if (handles.length > 0) {
+            const ownerRows = await db.select({ id: users.id, handle: users.handle }).from(users)
+              .where(inArray(users.handle, handles));
+            const authorId = it.authorId;
+            for (const o of ownerRows) {
+              if (o.id === authorId) continue; // never request review from the author
+              await db.insert(prReviewRequests)
+                .values({ prId, userId: o.id, source: "codeowners" })
+                .onConflictDoNothing();
+            }
+          }
+        } catch (err) {
+          console.error("[post-receive] codeowners assignment failed:", err);
+        }
+
         await db.update(intents).set({ linkedPrId: prId, status: "in_review" }).where(eq(intents.id, it.id));
         await db.insert(intentLinks).values({ intentId: it.id, kind: "pr", value: String(prNumber) }).onConflictDoNothing();
         await db.insert(activities).values({
@@ -247,4 +268,15 @@ async function firePushWebhook(
     ref: `refs/heads/${branch}`,
     commits: commitSummaries,
   });
+}
+
+/** Paths changed between base and head via diff-tree (name-only). */
+async function changedPathsBetween(gitDir: string, base: string, head: string): Promise<string[]> {
+  try {
+    const { gitIn } = await import("@forge/git");
+    const out = await gitIn(gitDir, ["diff-tree", "--no-commit-id", "--name-only", "-r", base, head]);
+    return out.split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
 }

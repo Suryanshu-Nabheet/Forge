@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { db, pullRequests, users, prReviewRequests } from "@forge/db";
 import { findVisibleRepo } from "@/server/authz";
 import { getPr, prDiff, prComments, prPreviews, prJobEvents, listApprovals } from "@/server/api";
 import { repoGitDir, isMergeable } from "@forge/git";
@@ -18,12 +20,16 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
   if (!pr) return <div className="text-[var(--text-dim)]">PR #{num} not found</div>;
 
   const gitDir = repoGitDir(org, repo);
-  const [diff, comments, previews, jobEvents, approvals] = await Promise.all([
+  const [diff, comments, previews, jobEvents, approvals, reviewers] = await Promise.all([
     prDiff(gitDir, pr.baseSha, pr.headSha),
     prComments(pr.id),
     prPreviews(pr.id),
     prJobEvents(pr.id),
     listApprovals(pr.id),
+    db.select({ handle: users.handle, source: prReviewRequests.source })
+      .from(prReviewRequests)
+      .innerJoin(users, eq(users.id, prReviewRequests.userId))
+      .where(eq(prReviewRequests.prId, pr.id)),
   ]);
   // Conflict badge: base←head merges cleanly? (Only meaningful while open.)
   const mergeable = pr.status === "open" && pr.baseSha && pr.headSha
@@ -55,6 +61,17 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
           </span>
         )}
       </div>
+      {reviewers.length > 0 && (
+        <div className="flex items-center gap-2 mb-1 flex-wrap text-[12px]">
+          <span className="text-[var(--text-faint)] uppercase tracking-wide text-[10px]">reviewers</span>
+          {reviewers.map((rv) => (
+            <a key={rv.handle} href={`/u/${rv.handle}`}
+              className="border border-[var(--border-strong)] rounded-full px-2 py-px text-[var(--text-dim)] hover:text-[var(--accent)]">
+              {rv.handle}{rv.source === "codeowners" ? " ⚙" : ""}
+            </a>
+          ))}
+        </div>
+      )}
       <div className="text-[13px] text-[var(--text-dim)] mb-4 mono">
         {pr.headBranch} → {pr.baseBranch} · {totalAdd}+ {totalDel}− · {diff.length} file{diff.length === 1 ? "" : "s"}
       </div>

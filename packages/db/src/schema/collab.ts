@@ -147,3 +147,25 @@ export const intentLinks = pgTable(
     uniqueIndex("intent_links_unique_idx").on(t.intentId, t.kind, t.value),
   ],
 );
+
+// ---------- review requests ----------
+
+/** Reviewer assignments per PR; CODEOWNERS auto-assignment writes here too. */
+export const prReviewRequests = pgTable(
+  "pr_review_requests",
+  {
+    id: serial("id").primaryKey(),
+    prId: integer("pr_id")
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").$type<"manual" | "codeowners">().notNull().default("manual"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pr_review_requests_pr_user_idx").on(t.prId, t.userId),
+    index("pr_review_requests_pr_idx").on(t.prId),
+  ],
+);

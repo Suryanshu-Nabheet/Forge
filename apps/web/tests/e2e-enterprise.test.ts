@@ -914,3 +914,70 @@ describe("user profiles", () => {
     expect(await page.text()).toContain("No such user");
   });
 });
+
+describe("CODEOWNERS review auto-assignment", () => {
+  it("assigns owners of changed paths as reviewers when a PR opens", async () => {
+    // Add sam as an org member of corp (already done for widget) and a
+    // CODEOWNERS file owned by sam, then push a branch that changes it.
+    const pat = await sfetch(`/api/pats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "t6", scopes: ["repo:read", "repo:write"] }),
+    });
+    const patBody = (await pat.json()) as { token: string };
+    const pushUrl = `http://eva:${patBody.token}@localhost:${PORT}/git/corp/grep-repo.git`;
+
+    // CODEOWNERS rides ON the feature branch: the parser reads it from the
+    // PR head, so real-world flows (protection blocks direct main pushes)
+    // work identically.
+    await git(["-C", work, "fetch", "--quiet", pushUrl, "refs/heads/main:refs/heads/main"]);
+    await git(["-C", work, "checkout", "--quiet", "main"]);
+    await git(["-C", work, "checkout", "--quiet", "-b", "codeowners-test"]);
+    await exec("bash", ["-c", `cd ${work} && mkdir -p .forge && printf '*.txt @sam\\n' > .forge/CODEOWNERS && printf 'line x v2\\n' > x.txt && git add . && git -c user.name=Eva -c user.email=eva@corp.dev commit --quiet -m "add codeowners + change txt"`]);
+    await git(["-C", work, "push", "--quiet", pushUrl, "HEAD:refs/heads/codeowners-test"]);
+
+    const pr = await sfetch(`/api/corp/grep-repo/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "codeowners PR", head: "codeowners-test", base: "main" }),
+    });
+    expect(pr.ok).toBe(true);
+    const prNum = ((await pr.json()) as { number: number }).number;
+
+    const reviewers = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`);
+    const rvBody = (await reviewers.json()) as { reviewers: Array<{ handle: string; source: string }> };
+    expect(reviewers.ok).toBe(true);
+    const sam = rvBody.reviewers.find((v) => v.handle === "sam");
+    expect(sam).toBeDefined();
+    expect(sam!.source).toBe("codeowners");
+
+    // The author is never auto-assigned: eva owns nothing in the file.
+    expect(rvBody.reviewers.some((v) => v.handle === "eva")).toBe(false);
+
+    // Reviewer chips render on the PR page.
+    const page = await fetch(`${BASE}/corp/grep-repo/pulls/${prNum}`);
+    expect(await page.text()).toContain("sam");
+
+    // Manual add/remove works too.
+    const add = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "zed" }),
+    });
+    expect(add.ok).toBe(true);
+    const rm = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "zed" }),
+    });
+    expect(rm.ok).toBe(true);
+
+    // Requesting review from the author is rejected.
+    const selfReq = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "eva" }),
+    });
+    expect(selfReq.status).toBe(400);
+  });
+});
