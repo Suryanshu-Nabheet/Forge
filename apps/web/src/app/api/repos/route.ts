@@ -30,11 +30,19 @@ export async function POST(req: Request) {
     }
     orgId = existingOrg.id;
   } else {
-    const [org] = await db.insert(organizations).values({
-      slug: orgSlug,
-      name: orgSlug,
-      ownerId: user.id,
-    }).returning({ id: organizations.id });
+    let org: { id: number } | undefined;
+    try {
+      [org] = await db.insert(organizations).values({
+        slug: orgSlug,
+        name: orgSlug,
+        ownerId: user.id,
+      }).returning({ id: organizations.id });
+    } catch {
+      // Lost a concurrent create race — the winner made the same org.
+      org = (await db.select({ id: organizations.id }).from(organizations)
+        .where(eq(organizations.slug, orgSlug)).limit(1))[0];
+      if (!org) throw new Error("org creation failed");
+    }
     orgId = org!.id;
     await db.insert(orgMembers).values({ orgId, userId: user.id, role: "owner" }).onConflictDoNothing();
   }
@@ -52,8 +60,15 @@ export async function POST(req: Request) {
     protectedBranches,
   }).returning({ id: repositories.id });
 
-  await initBareRepo(orgSlug, name);
-  await setProtectedBranches(repoGitDir(orgSlug, name), protectedBranches);
+  // Create the bare repo; on failure roll the DB row back so we don't
+  // leave a repo that 500s on every git operation (mirrors fork cleanup).
+  try {
+    await initBareRepo(orgSlug, name);
+    await setProtectedBranches(repoGitDir(orgSlug, name), protectedBranches);
+  } catch (err) {
+    await db.delete(repositories).where(eq(repositories.id, repo!.id));
+    return NextResponse.json({ error: "failed to initialize repository storage" }, { status: 500 });
+  }
 
   return NextResponse.json({ id: repo!.id, orgSlug, name });
 }

@@ -16,29 +16,40 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   const r = gate.repo;
   const user = gate.user;
 
-  const [{ max }] = await db
-    .select({ max: sql<number>`coalesce(max(${intents.number}), 0)` })
-    .from(intents)
-    .where(eq(intents.repoId, r.repoId));
 
   const kind = body.kind === "spec" || body.kind === "issue" ? body.kind : "intent";
-  const [intent] = await db
-    .insert(intents)
-    .values({
-      repoId: r.repoId,
-      number: max + 1,
-      title,
-      description: body.description ?? null,
-      kind,
-      labels: [],
-    })
-    .returning({ id: intents.id, number: intents.number });
+  // Retry on unique-number conflicts from concurrent creates (mirrors the
+  // PR-number retry in the post-receive handler).
+  let intent: { id: number; number: number } | undefined;
+  for (let attempt = 0; attempt < 3 && !intent; attempt++) {
+    const [{ max }] = await db
+      .select({ max: sql<number>`coalesce(max(${intents.number}), 0)` })
+      .from(intents)
+      .where(eq(intents.repoId, r.repoId));
+    try {
+      [intent] = await db
+        .insert(intents)
+        .values({
+          repoId: r.repoId,
+          number: max + 1,
+          title,
+          description: body.description ?? null,
+          kind,
+          labels: [],
+        })
+        .returning({ id: intents.id, number: intents.number });
+    } catch (err) {
+      if (attempt === 2) throw err;
+      await new Promise((res) => setTimeout(res, 50 + Math.random() * 100));
+    }
+  }
+  if (!intent) throw new Error("intent creation failed");
 
   await db.insert(activities).values({
     repoId: r.repoId,
     type: "intent_created",
-    data: { title, number: max + 1 },
+    data: { title, number: intent.number },
   });
 
-  return NextResponse.json({ id: intent!.id, number: intent!.number });
+  return NextResponse.json({ id: intent.id, number: intent.number });
 }
