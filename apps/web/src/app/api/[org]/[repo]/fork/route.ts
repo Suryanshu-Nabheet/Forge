@@ -73,7 +73,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ org: s
     await exec("git", ["clone", "--mirror", srcGitDir, dstGitDir]);
     // Mirror clones keep origin; reset it to point at the source's HTTP URL
     // so `git push`/`git fetch` in the fork talks to forge itself.
-    await gitIn(dstGitDir, ["remote", "set-url", "origin", `http://localhost:${process.env.FORGE_PORT ?? 3000}/git/${org}/${info.name}.git`]);
+    // Origin URL uses the external base when configured (correct behind proxies);
+    // otherwise the local bind address. Mirrored repos are self-contained —
+    // the origin is informational and pushes still go through auth.
+    const originBase = process.env.FORGE_EXTERNAL_URL?.replace(/\/$/, "")
+      ?? `http://localhost:${process.env.FORGE_PORT ?? 3000}`;
+    await gitIn(dstGitDir, ["remote", "set-url", "origin", `${originBase}/git/${org}/${info.name}.git`]);
     await setProtectedBranches(dstGitDir, ["main"]);
   } catch (err) {
     // DB rows cascade-delete the fork row on repo delete, but the failed

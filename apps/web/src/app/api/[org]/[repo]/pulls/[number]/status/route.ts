@@ -11,7 +11,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   if (!gate.ok) return gate.response;
   const user = gate.user;
   const num = Number(number);
-  const body = (await req.json()) as { status?: string };
+  const body = (await req.json().catch(() => ({}))) as { status?: string };
   const next = body.status === "open" || body.status === "closed" ? body.status : null;
   if (!next) return NextResponse.json({ error: "status must be open or closed" }, { status: 400 });
 

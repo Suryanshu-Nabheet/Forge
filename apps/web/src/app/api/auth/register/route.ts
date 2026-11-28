@@ -7,7 +7,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HANDLE_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,38}$/;
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { email?: string; name?: string; handle?: string; password?: string };
+  const body = (await req.json().catch(() => ({}))) as { email?: string; name?: string; handle?: string; password?: string };
   const email = (body.email ?? "").trim().toLowerCase();
   const name = (body.name ?? "").trim();
   const handle = (body.handle ?? "").trim().toLowerCase();

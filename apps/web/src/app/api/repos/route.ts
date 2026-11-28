@@ -12,7 +12,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 export async function POST(req: Request) {
   const user = await requireUser();
   if (!user) return unauthorized();
-  const body = (await req.json()) as {
+  const body = (await req.json().catch(() => ({}))) as {
     orgSlug?: string; name?: string; description?: string; visibility?: string;
   };
   const orgSlug = (body.orgSlug ?? "").trim().toLowerCase();

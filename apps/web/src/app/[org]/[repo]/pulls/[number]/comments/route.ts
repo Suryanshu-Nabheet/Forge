@@ -8,7 +8,7 @@ import { db, pullRequests, reviewComments } from "@forge/db";
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
   const { org, repo, number } = await params;
   const num = Number(number);
-  const body = (await req.json()) as { body?: string; path?: string; line?: number; side?: "old" | "new" };
+  const body = (await req.json().catch(() => ({}))) as { body?: string; path?: string; line?: number; side?: "old" | "new" };
   const text = (body.body ?? "").trim();
   if (!text) return NextResponse.json({ error: "body required" }, { status: 400 });
 

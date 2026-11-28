@@ -96,6 +96,23 @@ async function janitor(): Promise<void> {
     DELETE FROM job_runs
     WHERE finished_at < now() - interval '1 day'
   `);
+  // Delivery payloads (full webhook JSON per row) grow fastest of all.
+  await db.execute(sql`
+    DELETE FROM webhook_deliveries
+    WHERE created_at < now() - interval '30 days'
+  `);
+  // Activity feed: keep the most recent 1M rows (feeds only read the
+  // newest handful, but retention keeps the table (and the per-request
+  // unread count) bounded).
+  await db.execute(sql`
+    DELETE FROM activities
+    WHERE id < (SELECT coalesce(max(id), 0) - 1000000 FROM activities)
+  `);
+  // Preview rows accumulate per build; keep 90 days.
+  await db.execute(sql`
+    DELETE FROM previews
+    WHERE started_at < now() - interval '90 days'
+  `);
 }
 
 async function sleep(ms: number): Promise<void> {

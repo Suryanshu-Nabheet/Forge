@@ -13,6 +13,15 @@ const port = Number(process.env.FORGE_PORT ?? 3000);
 process.env.FORGE_POST_RECEIVE_URL ??= `http://127.0.0.1:${port}/internal/hooks/post-receive`;
 
 async function main() {
+  // Fail fast on configurations that would break silently in production.
+  const { validateEnv } = await import("@forge/db");
+  const problems = await validateEnv(process.env.NODE_ENV === "production");
+  for (const w of problems.warnings) console.warn(`[forge] env warning: ${w}`);
+  if (problems.fatal.length > 0) {
+    for (const f of problems.fatal) console.error(`[forge] FATAL: ${f}`);
+    process.exit(1);
+  }
+
   // Apply pending migrations before anything reads the schema.
   const { runMigrations } = await import("@forge/db");
   await runMigrations();
@@ -57,14 +66,22 @@ async function main() {
     }
   })();
 
+  let draining = false;
+
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const pathname = url.pathname;
 
     try {
       // 0. Health probes (no auth, no body): /healthz answers when the
-      // process is up; /healthz/ready additionally checks the database.
+      // process is up (503 while draining so LBs stop routing); /healthz/ready
+      // additionally checks the database.
       if (req.method === "GET" && pathname === "/healthz") {
+        if (draining) {
+          res.writeHead(503, { "Content-Type": "text/plain", "Retry-After": "30" });
+          res.end("draining");
+          return;
+        }
         res.writeHead(200, { "Content-Type": "text/plain" });
         res.end("ok");
         return;
@@ -145,6 +162,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    draining = true;
     console.log(`[forge] ${signal} received — draining…`);
     server.close();
     // Stop accepting new connections, then let in-flight jobs finish
@@ -342,10 +360,16 @@ async function handleSse(req: import("node:http").IncomingMessage, res: import("
     "X-Accel-Buffering": "no",
   });
   res.write(": connected\n\n");
+  // Heartbeat keeps proxies with idle read timeouts (nginx default 60s)
+  // from closing the stream during quiet builds.
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 15_000);
   const set = sseClients.get(channel) ?? new Set();
   set.add(res);
   sseClients.set(channel, set);
   req.on("close", () => {
+    clearInterval(heartbeat);
     set.delete(res);
     if (set.size === 0) sseClients.delete(channel);
   });

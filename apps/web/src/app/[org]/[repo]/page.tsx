@@ -38,7 +38,7 @@ export default async function CodePage({ params, searchParams }: PageProps) {
           <span className="text-xs text-[var(--text-faint)] mono">{sha?.slice(0, 7) ?? "empty"}</span>
           <span className="flex-1" />
           <span className="text-xs text-[var(--text-faint)] mono">
-            git clone http://localhost:3000/git/{org}/{repo}.git
+            git clone {cloneBase()}/git/{org}/{repo}.git
           </span>
         </div>
 
@@ -133,4 +133,8 @@ function FileView({ path, blob }: { path: string; blob: { content: string | null
       )}
     </div>
   );
+}
+
+function cloneBase(): string {
+  return (process.env.FORGE_EXTERNAL_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }

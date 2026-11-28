@@ -20,7 +20,7 @@ import {
 
 // ---------- repos ----------
 
-export async function listRepos(userId: number | null): Promise<RepoSummary[]> {
+export async function listRepos(userId: number | null, limit = 100): Promise<RepoSummary[]> {
   const rows = await db
     .select({
       id: repositories.id,
@@ -46,7 +46,8 @@ export async function listRepos(userId: number | null): Promise<RepoSummary[]> {
             sql`EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = ${repositories.orgId} AND m.user_id = ${userId})`,
           ),
     ))
-    .orderBy(desc(repositories.updatedAt));
+    .orderBy(desc(repositories.updatedAt))
+    .limit(limit);
   return rows.map((r) => ({
     id: r.id,
     orgSlug: r.orgSlug,

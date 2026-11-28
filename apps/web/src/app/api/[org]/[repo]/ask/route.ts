@@ -10,7 +10,7 @@ import { findVisibleRepo } from "@/server/authz";
 
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
-  const body = (await req.json()) as { question?: string; branch?: string };
+  const body = (await req.json().catch(() => ({}))) as { question?: string; branch?: string };
   const question = (body.question ?? "").trim();
   if (!question) return NextResponse.json({ error: "question required" }, { status: 400 });
 

@@ -43,12 +43,50 @@ export async function resolveWebhookTarget(rawUrl: string): Promise<WebhookTarge
     : await lookupWithTimeout(hostname);
   if (addresses.length === 0) throw new Error("webhook hostname did not resolve");
 
-  const allowPrivate = process.env.NODE_ENV !== "production" && process.env.FORGE_WEBHOOK_ALLOW_PRIVATE_TARGETS === "1";
-  if (!allowPrivate && addresses.some(({ address, family }) => !isPublicAddress(address, family))) {
+  // Egress policy (replaces the old NODE_ENV-gated escape hatch, which was
+  // unusable in production by construction):
+  //   FORGE_WEBHOOK_EGRESS=public          → only public addresses (default)
+  //   FORGE_WEBHOOK_EGRESS=private-allow   → private ranges allowed too
+  //   FORGE_WEBHOOK_EGRESS=allowlist        → only IPs inside FORGE_WEBHOOK_PRIVATE_CIDRS
+  // The old FORGE_WEBHOOK_ALLOW_PRIVATE_TARGETS=1 keeps working (dev escape).
+  const policy = webhookEgressPolicy();
+  if (policy === "public" && addresses.some(({ address, family }) => !isPublicAddress(address, family))) {
     throw new Error("webhook destination must resolve only to public addresses");
+  }
+  if (policy === "allowlist" && addresses.some(({ address, family }) => !isAllowedCidr(address, family))) {
+    throw new Error("webhook destination is outside the FORGE_WEBHOOK_PRIVATE_CIDRS allowlist");
   }
   const chosen = addresses[0]!;
   return { url, address: chosen.address, family: chosen.family as 4 | 6 };
+}
+
+
+type EgressPolicy = "public" | "private-allow" | "allowlist";
+
+function webhookEgressPolicy(): EgressPolicy {
+  const raw = (process.env.FORGE_WEBHOOK_EGRESS ?? "").trim().toLowerCase();
+  if (raw === "private-allow" || raw === "allowlist") return raw;
+  if (process.env.FORGE_WEBHOOK_ALLOW_PRIVATE_TARGETS === "1") return "private-allow";
+  return "public";
+}
+
+let allowlist: BlockList | null = null;
+let allowlistConfigured = false;
+
+/** Parse FORGE_WEBHOOK_PRIVATE_CIDRS ("10.0.0.0/8,192.168.1.0/24") lazily once. */
+function isAllowedCidr(address: string, family: number): boolean {
+  if (!allowlistConfigured) {
+    allowlistConfigured = true;
+    allowlist = new BlockList();
+    for (const part of (process.env.FORGE_WEBHOOK_PRIVATE_CIDRS ?? "").split(/[\s,]+/).filter(Boolean)) {
+      const [net, bits] = part.split("/");
+      if (!net || !bits || !/^\d+$/.test(bits)) continue; // skip malformed entries
+      allowlist.addSubnet(net, Number(bits), isIP(net) === 6 ? "ipv6" : "ipv4");
+    }
+  }
+  if (!allowlist) return false;
+  const kind = family === 6 ? "ipv6" : "ipv4";
+  return allowlist.check(address, kind);
 }
 
 async function lookupWithTimeout(hostname: string): Promise<Array<{ address: string; family: number }>> {

@@ -7,7 +7,7 @@ import { db, intents, activities } from "@forge/db";
 
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
-  const body = (await req.json()) as { title?: string; description?: string; kind?: string };
+  const body = (await req.json().catch(() => ({}))) as { title?: string; description?: string; kind?: string };
   const title = (body.title ?? "").trim();
   if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
 

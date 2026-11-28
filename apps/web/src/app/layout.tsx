@@ -22,7 +22,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     userId = u?.id ?? null;
   } catch { userName = null; }
   try {
-    repos = (await listRepos(userId)).map((r) => ({ orgSlug: r.orgSlug, name: r.name }));
+    repos = (await listRepos(userId, 30)).map((r) => ({ orgSlug: r.orgSlug, name: r.name }));
   } catch { repos = []; } // palette degrades gracefully pre-migration
   try {
     if (userId !== null) unread = await countUnreadNotifications(userId);
