@@ -58,6 +58,36 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   }
   if (!intent) throw new Error("intent creation failed");
 
+  // Duplicate detection: rank this repo's OPEN intents by embedding
+  // similarity and note plausible duplicates in the description so
+  // triage starts with context. Best-effort; never blocks creation.
+  try {
+    const { findDuplicateIssues } = await import("@forge/ai");
+    const open = await db
+      .select({ number: intents.number, title: intents.title, description: intents.description, plan: intents.plan })
+      .from(intents)
+      .where(and(eq(intents.repoId, r.repoId), sql`${intents.status} NOT IN ('done','closed')`))
+      .limit(500);
+    if (open.length > 0 && intent.number) {
+      const { embedLocal } = await import("@forge/ai");
+      const existing = open
+        .filter((o) => o.number !== intent!.number)
+        .map((o) => ({
+          number: o.number,
+          title: o.title,
+          description: o.description,
+          embedding: embedLocal(`${o.title}\n${o.description ?? ""}`, null),
+        }));
+      const dupes = findDuplicateIssues({ title, description: body.description ?? "" }, existing);
+      if (dupes.length > 0) {
+        const note = `\n\n---\n_Possible duplicates:_ ${dupes.map((d) => `#${d.number} (\`${d.similarity.toFixed(2)}\`)`).join(", ")}`;
+        await db.update(intents).set({ description: (body.description ?? "") + note }).where(eq(intents.id, intent.id));
+      }
+    }
+  } catch (err) {
+    console.error("[issues] duplicate detection failed:", err);
+  }
+
   await db.insert(activities).values({
     repoId: r.repoId,
     userId: user.id,

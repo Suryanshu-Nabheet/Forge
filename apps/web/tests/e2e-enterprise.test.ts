@@ -1066,3 +1066,32 @@ describe("Fixes #n auto-close", () => {
     expect(row.status).toBe("done");
   });
 });
+
+describe("duplicate issue detection", () => {
+  it("flags similar existing intents as possible duplicates", async () => {
+    // Seed a distinctive issue.
+    const seed = await sfetch(`/api/corp/grep-repo/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Login page slow on mobile devices", description: "The login screen takes 10 seconds to load on phones" }),
+    });
+    const seedIssue = (await seed.json()) as { number: number };
+    expect(seed.ok).toBe(true);
+
+    // File a near-duplicate with different wording.
+    const dupe = await sfetch(`/api/corp/grep-repo/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Login screen very slow on phones", description: "Loading the login takes forever on mobile" }),
+    });
+    const dupeIssue = (await dupe.json()) as { number: number };
+    expect(dupe.ok).toBe(true);
+
+    const row = (await db.query(
+      `SELECT description FROM intents WHERE number = $1 AND repo_id = (SELECT id FROM repositories WHERE name = 'grep-repo')`,
+      [dupeIssue.number],
+    )).rows[0] as { description: string | null };
+    expect(row.description).toContain("Possible duplicates:");
+    expect(row.description).toContain(`#${seedIssue.number}`);
+  });
+});

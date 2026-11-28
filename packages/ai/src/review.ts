@@ -3,6 +3,7 @@
 
 import type { DiffFile, ReviewAnalysis, ReviewFinding } from "@forge/shared";
 import { aiMode } from "./client";
+import { embedLocal, cosine } from "./embeddings";
 
 export async function analyzeDiffForReview(diff: DiffFile[]): Promise<ReviewAnalysis> {
   if (aiMode() === "claude") {
@@ -304,4 +305,32 @@ export function triageLabels(title: string, description: string): string[] {
     if (hits.length >= 3) break;
   }
   return hits;
+}
+
+// ---------- duplicate issue detection (deterministic) ----------
+
+/**
+ * Rank existing issues by embedding similarity to a new issue's
+ * title+description. Returns the ids/numbers of up to `max` issues
+ * whose similarity meets the threshold — a lightweight "possible
+ * duplicate" signal surfaced at creation time. Pure function: the
+ * caller supplies (number, text, embedding) triples.
+ */
+export function findDuplicateIssues(
+  candidate: { title: string; description: string },
+  existing: Array<{ number: number; title: string; description: string | null; embedding: number[] }>,
+  opts?: { threshold?: number; max?: number },
+): Array<{ number: number; similarity: number }> {
+  
+  const threshold = opts?.threshold ?? 0.42;
+  const max = opts?.max ?? 3;
+  const qv = embedLocal(`${candidate.title}\n${candidate.description ?? ""}`, null);
+  return existing
+    .map((e) => ({
+      number: e.number,
+      similarity: cosine(qv, e.embedding),
+    }))
+    .filter((x) => x.similarity >= threshold)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, max);
 }
