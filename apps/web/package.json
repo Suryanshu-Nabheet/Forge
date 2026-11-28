@@ -22,9 +22,9 @@
     "@forge/sandbox": "workspace:*",
     "@forge/shared": "workspace:*",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "^0.45.4",
     "lucide-react": "^0.552.0",
-    "next": "15.5.8",
+    "next": "15.5.29",
     "pg": "^8.16.3",
     "react": "19.2.1",
     "react-dom": "19.2.1",
@@ -38,9 +38,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ssh2": "^1.15.6",
-    "drizzle-kit": "^0.31.4",
+    "drizzle-kit": "^0.31.11",
     "tailwindcss": "^4.1.17",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^5.1.2"
   }
 }

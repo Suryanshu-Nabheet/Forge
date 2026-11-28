@@ -14,7 +14,7 @@
     "@forge/git": "workspace:*",
     "@forge/sandbox": "workspace:*",
     "@forge/shared": "workspace:*",
-    "drizzle-orm": "^0.44.7"
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
