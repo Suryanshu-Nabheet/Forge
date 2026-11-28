@@ -405,3 +405,107 @@ describe("audit log", () => {
     expect(actions).toContain("auth.login_locked");
   });
 });
+
+describe("two-factor authentication", () => {
+  it("requires a TOTP code at login after enrollment and supports recovery codes", async () => {
+    // Import the real TOTP helpers to compute valid codes in-test.
+    const { totpCode } = await import("@forge/db");
+
+    // Fresh user enrolls 2FA through the API.
+    const reg = await fetch(`${BASE}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", name: "Tess Two", handle: "tess", password: "longpassword1" }),
+    });
+    const tessCookie = (reg.headers.get("set-cookie") ?? "").split(";")[0]!;
+
+    const enrolled = await fetch(`${BASE}/api/2fa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: tessCookie },
+      body: JSON.stringify({ action: "enroll" }),
+    });
+    const enrollBody = (await enrolled.json()) as { secret: string };
+    expect(enrolled.ok).toBe(true);
+    expect(enrollBody.secret).toMatch(/^[A-Z2-7]{32}$/);
+
+    const confirm = await fetch(`${BASE}/api/2fa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: tessCookie },
+      body: JSON.stringify({ action: "confirm", code: totpCode(enrollBody.secret), secret: enrollBody.secret }),
+    });
+    const confirmBody = (await confirm.json()) as { recoveryCodes: string[] };
+    expect(confirm.ok).toBe(true);
+    expect(confirmBody.recoveryCodes).toHaveLength(8);
+
+    // Status endpoint says enabled.
+    const status = await fetch(`${BASE}/api/2fa`, { headers: { cookie: tessCookie } });
+    expect(((await status.json()) as { enabled: boolean }).enabled).toBe(true);
+
+    // Login with the correct password now stalls at the TOTP challenge.
+    const login1 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1" }),
+    });
+    const login1Body = (await login1.json()) as { totpRequired?: boolean };
+    expect(login1Body.totpRequired).toBe(true);
+    expect(login1.headers.get("set-cookie")).toBeNull(); // no session yet
+
+    // Wrong code is rejected.
+    const login2 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1", code: "000000" }),
+    });
+    expect(login2.status).toBe(401);
+
+    // Correct code completes the login.
+    const login3 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1", code: totpCode(enrollBody.secret) }),
+    });
+    expect(login3.ok).toBe(true);
+    expect(login3.headers.get("set-cookie")).toMatch(/^forge_session=/);
+
+    // Recovery code: use one, confirm it is single-use.
+    const recovery = confirmBody.recoveryCodes[0]!;
+    const login4 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1", recoveryCode: recovery }),
+    });
+    expect(login4.ok).toBe(true);
+
+    const login5 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1", recoveryCode: recovery }),
+    });
+    expect(login5.status).toBe(401); // already consumed
+
+    // Disable with a current code.
+    const disable = await fetch(`${BASE}/api/2fa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: tessCookie },
+      body: JSON.stringify({ action: "disable", code: totpCode(enrollBody.secret) }),
+    });
+    expect(disable.ok).toBe(true);
+
+    // Login no longer challenges.
+    const login6 = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "tess@corp.dev", password: "longpassword1" }),
+    });
+    expect(login6.ok).toBe(true);
+
+    // Audit trail covers enable + disable.
+    const auditRows = await db.query(
+      `SELECT action FROM audit_log WHERE action LIKE '2fa.%' ORDER BY id`,
+    );
+    const actions = (auditRows.rows as Array<{ action: string }>).map((r) => r.action);
+    expect(actions).toContain("2fa.enable");
+    expect(actions).toContain("2fa.disable");
+  });
+});

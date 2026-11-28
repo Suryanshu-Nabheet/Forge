@@ -39,6 +39,9 @@ export type AuditAction =
   | "auth.login"
   | "auth.login_failed"
   | "auth.login_locked"
+  | "auth.totp_failed"
+  | "auth.recovery_failed"
+  | "auth.recovery_used"
   | "auth.logout"
   | "auth.register"
   | "pat.create"
@@ -54,4 +57,6 @@ export type AuditAction =
   | "pr.approve"
   | "pr.request_changes"
   | "webhook.create"
-  | "webhook.delete";
+  | "webhook.delete"
+  | "2fa.enable"
+  | "2fa.disable";

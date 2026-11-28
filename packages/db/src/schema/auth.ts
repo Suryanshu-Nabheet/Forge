@@ -19,6 +19,11 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   avatarUrl: text("avatar_url"),
   notificationsReadAt: timestamp("notifications_read_at", { withTimezone: true }).notNull().defaultNow(),
+  // TOTP two-factor auth (RFC 6238). Secret is AES-256-GCM encrypted at
+  // rest with a key derived from FORGE_SECRET; null until enrolled.
+  totpSecret: text("totp_secret"),
+  totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+  recoveryCodes: text("recovery_codes"), // sha256 hashes, comma-separated
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
