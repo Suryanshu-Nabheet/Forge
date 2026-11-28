@@ -511,3 +511,49 @@ describe("two-factor authentication", () => {
     expect(actions).toContain("2fa.disable");
   });
 });
+
+describe("webhook redelivery", () => {
+  it("retries a recorded delivery as a new delivery row", async () => {
+    // Grab the failed delivery recorded earlier (dead-endpoint hook).
+    const failed = await db.query(
+      `SELECT id FROM webhook_deliveries WHERE status = 'failed' ORDER BY id DESC LIMIT 1`,
+    );
+    const deliveryId = (failed.rows[0] as { id: number }).id;
+
+    const res = await sfetch(`/api/corp/widget/hooks`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "redeliver", deliveryId }),
+    });
+    const body = (await res.json()) as { ok?: boolean; deliveryId?: number };
+    expect(res.ok).toBe(true);
+    expect(body.deliveryId).toBeGreaterThan(deliveryId);
+
+    // The retry also fails (endpoint still dead) and is recorded as its own row.
+    const deadline = Date.now() + 20_000;
+    let retried: { status: string } | undefined;
+    while (Date.now() < deadline) {
+      const r = await db.query(`SELECT status FROM webhook_deliveries WHERE id = $1`, [body.deliveryId!]);
+      const row = r.rows[0] as { status: string } | undefined;
+      if (row && row.status !== "pending") { retried = row; break; }
+      await new Promise((r2) => setTimeout(r2, 400));
+    }
+    expect(retried).toBeDefined();
+    expect(retried!.status).toBe("failed");
+
+    // Original row untouched; redelivery is audited.
+    const orig = await db.query(`SELECT status FROM webhook_deliveries WHERE id = $1`, [deliveryId]);
+    expect((orig.rows[0] as { status: string }).status).toBe("failed");
+    const audit = await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'webhook.redeliver'`);
+    expect((audit.rows[0] as { n: number }).n).toBeGreaterThan(0);
+  });
+
+  it("rejects redelivery of another repo's delivery", async () => {
+    const res = await sfetch(`/api/corp/widget/hooks`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "redeliver", deliveryId: 999999 }),
+    });
+    expect(res.status).toBe(404);
+  });
+});

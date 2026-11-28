@@ -172,3 +172,57 @@ export function pingPayload(org: string, name: string, visibility: "public" | "p
     repository: { org, name, visibility },
   };
 }
+
+/**
+ * Retry a recorded delivery: re-sign the stored payload with the hook's
+ * current secret and deliver it again through the same SSRF-hardened
+ * pipeline. Records a NEW delivery row (the original stays as history).
+ * Returns the new delivery id. Throws only for caller errors (unknown
+ * delivery / hook); the delivery attempt itself is recorded, never thrown.
+ */
+export async function redeliverWebhook(deliveryId: number): Promise<number> {
+  const deliveryRows = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, deliveryId)).limit(1);
+  const delivery = deliveryRows[0];
+  if (!delivery) throw new Error("delivery not found");
+  const hookRows = await db.select().from(webhooks).where(eq(webhooks.id, delivery.webhookId)).limit(1);
+  const hook = hookRows[0];
+  if (!hook) throw new Error("webhook not found");
+  if (!hook.active) throw new Error("webhook is inactive");
+
+  const payload = delivery.payload as WebhookPayload;
+  const event = payload.event ?? delivery.event;
+  const body = JSON.stringify(payload);
+  const signature = signPayload(hook.secret, body);
+  const [row] = await db.insert(webhookDeliveries).values({
+    webhookId: hook.id,
+    event,
+    status: "pending",
+    payload,
+  }).returning({ id: webhookDeliveries.id });
+
+  const started = Date.now();
+  let status: "delivered" | "failed" = "failed";
+  let responseStatus: number | null = null;
+  let error: string | null = null;
+  try {
+    const target = await resolveWebhookTarget(hook.url);
+    responseStatus = await postWebhook(target, {
+      "Content-Type": "application/json",
+      "X-Forge-Event": event,
+      "X-Forge-Signature": signature,
+      "X-Forge-Delivery": String(row!.id),
+      "User-Agent": "Forge-Webhook/1.0",
+    }, body);
+    status = responseStatus >= 200 && responseStatus < 300 ? "delivered" : "failed";
+    if (status === "failed") error = `endpoint responded ${responseStatus}`;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+  await db.update(webhookDeliveries).set({
+    status,
+    responseStatus,
+    durationMs: Date.now() - started,
+    error,
+  }).where(eq(webhookDeliveries.id, row!.id));
+  return row!.id;
+}

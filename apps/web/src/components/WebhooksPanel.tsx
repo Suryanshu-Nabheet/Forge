@@ -89,6 +89,26 @@ export function WebhooksPanel({ org, repo }: { org: string; repo: string }) {
     }
   }
 
+  async function redeliver(deliveryId: number) {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/${org}/${repo}/hooks`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "redeliver", deliveryId }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? `failed (${res.status})`);
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!loaded) return <div className="text-[13px] text-[var(--text-dim)]">loading…</div>;
 
   return (
@@ -174,6 +194,14 @@ export function WebhooksPanel({ org, repo }: { org: string; repo: string }) {
                         {d.durationMs !== null && <span className="text-[var(--text-faint)]">{d.durationMs}ms</span>}
                         {d.error && <span className="text-[var(--red)] truncate max-w-48" title={d.error}>{d.error}</span>}
                         <span className="flex-1" />
+                        <button
+                          className="btn px-1.5 py-0.5 text-[10px]"
+                          disabled={busy}
+                          title="Retry this delivery"
+                          onClick={() => void redeliver(d.id)}
+                        >
+                          ⟳
+                        </button>
                         <span className="text-[var(--text-faint)]">{new Date(d.createdAt).toLocaleString()}</span>
                       </div>
                     ))}
