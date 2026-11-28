@@ -1,7 +1,8 @@
 // Forge custom server: Next.js UI + git smart HTTP + internal hooks + SSE.
 // This is the single process story: `pnpm dev` boots web + git + workers together.
 
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { createGzip, type Gzip } from "node:zlib";
 import { timingSafeEqual } from "node:crypto";
 import nextFactory from "next";
 
@@ -61,6 +62,27 @@ async function main() {
     const pathname = url.pathname;
 
     try {
+      // 0. Health probes (no auth, no body): /healthz answers when the
+      // process is up; /healthz/ready additionally checks the database.
+      if (req.method === "GET" && pathname === "/healthz") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("ok");
+        return;
+      }
+      if (req.method === "GET" && pathname === "/healthz/ready") {
+        try {
+          const { db } = await import("@forge/db");
+          const { sql } = await import("drizzle-orm");
+          await db.execute(sql`SELECT 1`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, db: true, pid: process.pid }));
+        } catch (err) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, db: false, error: err instanceof Error ? err.message : "db check failed" }));
+        }
+        return;
+      }
+
       // 1. Internal hook endpoint (post-receive from git bare repos)
       if (req.method === "POST" && pathname === "/internal/hooks/post-receive") {
         // Authenticated with the shared hook token (constant-time compare).
@@ -95,8 +117,8 @@ async function main() {
         return;
       }
 
-      // 4. Everything else → Next.js
-      await nextHandler(req, res);
+      // 4. Everything else → Next.js, gzipped for compressible types.
+      await nextHandler(req, withGzip(req, res));
     } catch (err) {
       console.error("[server] request error:", err);
       if (!res.headersSent) {
@@ -141,6 +163,53 @@ function safeTokenEqual(presented: string, expected: string): boolean {
   const a = Buffer.from(presented);
   const b = Buffer.from(expected);
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+}
+
+/**
+ * Transparent gzip for Next.js-served responses. Installs a compression
+ * stream by intercepting writeHead/write/end before the handler runs:
+ * compressible content types get Content-Encoding: gzip and the original
+ * Content-Length dropped (compressed size differs). SSE, git protocol,
+ * health, and hook paths never pass through here.
+ */
+function withGzip(req: IncomingMessage, res: ServerResponse): ServerResponse {
+  const accepts = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+  if (!accepts) return res;
+
+  const rawWriteHead = res.writeHead.bind(res);
+  const rawWrite = res.write.bind(res);
+  const rawEnd = res.end.bind(res);
+  let gz: Gzip | null = null;
+
+  res.writeHead = ((status: number, headers?: Record<string, unknown> | ServerResponse) => {
+    const merged = typeof headers === "object" && headers !== null
+      ? { ...headers as Record<string, unknown> }
+      : {};
+    const type = String(merged["Content-Type"] ?? merged["content-type"] ?? "");
+    const alreadyEncoded = "Content-Encoding" in merged || "content-encoding" in merged;
+    if (/^(text\/|application\/(json|javascript|xml)|image\/svg)/.test(type) && !alreadyEncoded) {
+      gz = createGzip({ level: 6 });
+      gz.on("data", (chunk) => rawWrite(chunk));
+      gz.on("end", () => rawEnd());
+      delete merged["Content-Length"];
+      delete merged["content-length"];
+      merged["Content-Encoding"] = "gzip";
+      merged["Vary"] = [merged["Vary"], "Accept-Encoding"].filter(Boolean).join(", ");
+    }
+    return rawWriteHead(status, merged as never);
+  }) as typeof res.writeHead;
+
+  res.write = ((chunk: never) => (gz ? gz.write(chunk) : rawWrite(chunk))) as typeof res.write;
+  res.end = ((chunk?: never) => {
+    if (gz) {
+      if (chunk) gz.write(chunk);
+      gz.end();
+      return res;
+    }
+    return rawEnd(chunk);
+  }) as typeof res.end;
+
+  return res;
 }
 
 function readBody(req: import("node:http").IncomingMessage, limit = 10 * 1024 * 1024): Promise<string> {
