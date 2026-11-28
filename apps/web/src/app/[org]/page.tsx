@@ -1,6 +1,6 @@
 // /org — organization landing: its repositories.
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, organizations, repositories } from "@forge/db";
 import { desc, sql } from "drizzle-orm";
 import Link from "next/link";
@@ -18,6 +18,10 @@ export default async function OrgPage({ params }: { params: Promise<{ org: strin
     return <div className="p-8 text-center text-[var(--text-dim)]">Organization not found: {orgSlug}</div>;
   }
 
+  const user = await currentUser();
+  const you = user ? await roleInOrg(org.id, user.id) : "none";
+
+  // Private repos are only listed for org members/owner (authz parity).
   const repos = await db
     .select({
       id: repositories.id,
@@ -28,11 +32,12 @@ export default async function OrgPage({ params }: { params: Promise<{ org: strin
       openPrCount: sql<number>`(SELECT count(*) FROM pull_requests pr WHERE pr.repo_id = ${repositories.id} AND pr.status = 'open')`,
     })
     .from(repositories)
-    .where(eq(repositories.orgId, org.id))
+    .where(
+      you === "none"
+        ? and(eq(repositories.orgId, org.id), eq(repositories.visibility, "public"))
+        : eq(repositories.orgId, org.id),
+    )
     .orderBy(desc(repositories.updatedAt));
-
-  const user = await currentUser();
-  const you = user ? await roleInOrg(org.id, user.id) : "none";
 
   return (
     <div>

@@ -85,6 +85,7 @@ function BranchSwitcher({ org, repo, branch, branches }: { org: string; repo: st
           <option key={b} value={b}>{b}</option>
         ))}
       </select>
+      <button type="submit" className="btn px-2 py-1 text-xs">Go</button>
     </form>
   );
 }

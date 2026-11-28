@@ -1,7 +1,7 @@
 // Server-side data access for UI pages + REST API routes.
 // One module so both React server components and route handlers share logic.
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db } from "@forge/db";
 import {
   users, organizations, repositories, branches, commits,
@@ -20,7 +20,7 @@ import {
 
 // ---------- repos ----------
 
-export async function listRepos(): Promise<RepoSummary[]> {
+export async function listRepos(userId: number | null): Promise<RepoSummary[]> {
   const rows = await db
     .select({
       id: repositories.id,
@@ -35,6 +35,17 @@ export async function listRepos(): Promise<RepoSummary[]> {
     })
     .from(repositories)
     .innerJoin(organizations, eq(organizations.id, repositories.orgId))
+    // Visibility filter: public repos for everyone; private repos only
+    // for the owning org's members/owner (mirrors the authz core).
+    .where(or(
+      eq(repositories.visibility, "public"),
+      userId === null
+        ? sql`false`
+        : or(
+            eq(organizations.ownerId, userId),
+            sql`EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = ${repositories.orgId} AND m.user_id = ${userId})`,
+          ),
+    ))
     .orderBy(desc(repositories.updatedAt));
   return rows.map((r) => ({
     id: r.id,
@@ -247,8 +258,24 @@ export async function intentLinksFor(intentId: number) {
 
 // ---------- activity ----------
 
-export async function recentActivity(limit = 20) {
-  return db.select().from(activities).orderBy(desc(activities.id)).limit(limit);
+/** Activity across repos the user can read (public + their orgs). */
+export async function recentActivity(limit = 20, userId: number | null = null) {
+  return db
+    .select({ id: activities.id, repoId: activities.repoId, userId: activities.userId, type: activities.type, data: activities.data, createdAt: activities.createdAt })
+    .from(activities)
+    .innerJoin(repositories, eq(repositories.id, activities.repoId))
+    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
+    .where(or(
+      eq(repositories.visibility, "public"),
+      userId === null
+        ? sql`false`
+        : or(
+            eq(organizations.ownerId, userId),
+            sql`EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = ${repositories.orgId} AND m.user_id = ${userId})`,
+          ),
+    ))
+    .orderBy(desc(activities.id))
+    .limit(limit);
 }
 
 // ---------- social: stars / watchers / forks ----------

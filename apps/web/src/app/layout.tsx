@@ -15,14 +15,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   let repos: Array<{ orgSlug: string; name: string }> = [];
   let userName: string | null = null;
   let unread = 0;
-  try {
-    repos = (await listRepos()).map((r) => ({ orgSlug: r.orgSlug, name: r.name }));
-  } catch { repos = []; } // palette degrades gracefully pre-migration
+  let userId: number | null = null;
   try {
     const u = await currentUser();
     userName = u?.name ?? null;
-    if (u) unread = await countUnreadNotifications(u.id);
+    userId = u?.id ?? null;
   } catch { userName = null; }
+  try {
+    repos = (await listRepos(userId)).map((r) => ({ orgSlug: r.orgSlug, name: r.name }));
+  } catch { repos = []; } // palette degrades gracefully pre-migration
+  try {
+    if (userId !== null) unread = await countUnreadNotifications(userId);
+  } catch { unread = 0; }
   return (
     <html lang="en" className="dark">
       <body>

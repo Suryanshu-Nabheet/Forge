@@ -1,9 +1,11 @@
 import { listRepos, recentActivity } from "@/server/api";
+import { currentUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const [repos, activity] = await Promise.all([listRepos(), recentActivity(15)]);
+  const user = await currentUser();
+  const [repos, activity] = await Promise.all([listRepos(user?.id ?? null), recentActivity(15, user?.id ?? null)]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

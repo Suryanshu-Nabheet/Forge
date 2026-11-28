@@ -27,6 +27,8 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
 
   const aiComments = comments.filter((c) => c.kind === "ai_review");
   const humanComments = comments.filter((c) => c.kind === "human");
+  // Comments without a diff anchor (from the top-level comment box).
+  const generalComments = comments.filter((c) => c.path === null);
   const latestPreview = previews[0] ?? null;
   const totalAdd = diff.reduce((n, f) => n + f.additions, 0);
   const totalDel = diff.reduce((n, f) => n + f.deletions, 0);
@@ -79,6 +81,23 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
           <DiffFileCard key={f.path} file={f} comments={aiComments.concat(humanComments)} />
         ))}
       </div>
+
+      {/* General (non-inline) comments */}
+      {generalComments.length > 0 && (
+        <div className="card p-4 mt-4">
+          <h2 className="text-sm font-semibold mb-2">Conversation</h2>
+          <div className="space-y-3">
+            {generalComments.map((c) => (
+              <div key={c.id} className="p-2.5 rounded text-[13px] border border-[var(--border-strong)]">
+                <div className="text-[10px] uppercase tracking-wide text-[var(--text-faint)] mb-1">
+                  {c.kind === "ai_review" ? "🤖 autonomous reviewer" : "human"}
+                </div>
+                <Markdown text={c.body} className="leading-relaxed" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 text-[13px] text-[var(--text-dim)]">
         {aiComments.length} AI finding{aiComments.length === 1 ? "" : "s"} · {humanComments.length} human comment{humanComments.length === 1 ? "" : "s"}

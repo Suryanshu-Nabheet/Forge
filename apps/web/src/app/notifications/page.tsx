@@ -27,20 +27,31 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [marking, setMarking] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      const res = await fetch("/api/notifications");
-      if (res.ok) {
-        const data = (await res.json()) as { notifications: Notification[]; unread: number };
-        setNotifications(data.notifications);
-        setUnread(data.unread);
-        // Mark read once rendered.
-        await fetch("/api/notifications", { method: "POST" });
-      }
+      try {
+        const res = await fetch("/api/notifications");
+        if (res.ok) {
+          const data = (await res.json()) as { notifications: Notification[]; unread: number };
+          setNotifications(data.notifications);
+          setUnread(data.unread);
+        }
+      } catch { /* leave empty state */ }
       setLoaded(true);
     })();
   }, []);
+
+  async function markAllRead() {
+    setMarking(true);
+    try {
+      await fetch("/api/notifications", { method: "POST" });
+      setUnread(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+    } catch { /* badge refreshes next load */ }
+    finally { setMarking(false); }
+  }
 
   function hrefFor(n: Notification): string {
     const num = (n.data as { number?: number }).number;
@@ -53,7 +64,14 @@ export default function NotificationsPage() {
     <div className="max-w-2xl">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold">Inbox</h1>
-        <span className="text-xs text-[var(--text-faint)]">{unread} unread</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[var(--text-faint)]">{unread} unread</span>
+          {unread > 0 && (
+            <button className="btn px-2 py-1 text-xs" disabled={marking} onClick={markAllRead}>
+              {marking ? "Marking…" : "Mark all read"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="card divide-y">
         {!loaded && <div className="px-4 py-8 text-center text-[13px] text-[var(--text-dim)]">loading…</div>}

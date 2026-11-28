@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 
 interface BranchInfo {
   branches: string[];
@@ -11,6 +11,7 @@ interface BranchInfo {
 export default function NewPullPage() {
   const router = useRouter();
   const { org: orgSlug, repo: repoName } = useParams<{ org: string; repo: string }>();
+  const searchParams = useSearchParams();
   const [info, setInfo] = useState<BranchInfo | null>(null);
   const [head, setHead] = useState("");
   const [base, setBase] = useState("");
@@ -18,22 +19,31 @@ export default function NewPullPage() {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
 
-  async function load() {
-    const res = await fetch(`/api/${orgSlug}/${repoName}/pulls/new`, { method: "GET" });
-    if (res.ok) {
-      const data = (await res.json()) as BranchInfo;
-      setInfo(data);
-      setBase(data.defaultBranch);
-      if (data.branches.length > 0 && data.defaultBranch) {
-        const firstOther = data.branches.find((b) => b !== data.defaultBranch);
-        if (firstOther) setHead(firstOther);
-      }
-    }
-    setLoaded(true);
-  }
-  if (!loaded) void load(), setLoaded(true);
+  // Preselection from the compare page (?base=…&head=…).
+  const wantedBase = searchParams.get("base") ?? "";
+  const wantedHead = searchParams.get("head") ?? "";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/${orgSlug}/${repoName}/pulls/new`, { method: "GET" });
+        if (!res.ok) return;
+        const data = (await res.json()) as BranchInfo;
+        if (cancelled) return;
+        setInfo(data);
+        setBase(data.branches.includes(wantedBase) ? wantedBase : data.defaultBranch);
+        if (wantedHead && data.branches.includes(wantedHead)) {
+          setHead(wantedHead);
+        } else {
+          const firstOther = data.branches.find((b) => b !== (wantedBase || data.defaultBranch));
+          if (firstOther) setHead(firstOther);
+        }
+      } catch { /* degrade to defaults below */ }
+    })();
+    return () => { cancelled = true; };
+  }, [orgSlug, repoName, wantedBase, wantedHead]);
 
   async function submit() {
     setBusy(true);
@@ -44,12 +54,14 @@ export default function NewPullPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, head, base, description }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { number?: number; error?: string };
+      if (res.ok && data.number) {
         router.push(`/${orgSlug}/${repoName}/pulls/${data.number}`);
       } else {
         setError(data.error ?? "failed to create pull request");
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

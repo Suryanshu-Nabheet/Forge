@@ -2,6 +2,7 @@ import { findVisibleRepo } from "@/server/authz";
 import { getIntent, intentLinksFor } from "@/server/api";
 import { db, pullRequests } from "@forge/db";
 import { eq } from "drizzle-orm";
+import { PlanActionsClient } from "@/components/PlanActionsClient";
 
 export const dynamic = "force-dynamic";
 
@@ -98,14 +99,5 @@ export default async function IntentPage({ params }: { params: Promise<{ org: st
 }
 
 function PlanActions({ org, repo, number, hasPlan }: { org: string; repo: string; number: number; hasPlan: boolean }) {
-  return (
-    <div className="flex gap-2">
-      <form action={`/api/${org}/${repo}/issues/${number}/plan`} method="post">
-        <button className="btn btn-primary" name="action" value="draft">{hasPlan ? "Re-draft plan" : "Draft implementation plan"}</button>
-      </form>
-      <form action={`/api/${org}/${repo}/issues/${number}/scaffold`} method="post">
-        <button className="btn" name="action" value="scaffold">Create branch scaffold</button>
-      </form>
-    </div>
-  );
+  return <PlanActionsClient org={org} repo={repo} number={number} hasPlan={hasPlan} />;
 }

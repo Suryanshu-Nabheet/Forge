@@ -21,9 +21,11 @@ export default function NewRepoPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orgSlug, name, description, visibility }),
       });
-      const data = await res.json();
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (res.ok) router.push(`/${orgSlug}/${name}`);
       else setError(data.error ?? "failed");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
