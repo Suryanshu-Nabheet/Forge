@@ -958,19 +958,30 @@ describe("CODEOWNERS review auto-assignment", () => {
     const page = await fetch(`${BASE}/corp/grep-repo/pulls/${prNum}`);
     expect(await page.text()).toContain("sam");
 
-    // Manual add/remove works too.
+    // Manual add/remove works for org members. tess needs corp membership
+    // first (sam is already the CODEOWNERS assignee on this PR).
+    const tessOrgId = (await db.query(`SELECT id FROM organizations WHERE slug = 'corp'`)).rows[0] as { id: number };
+    await db.query(`INSERT INTO org_members (org_id, user_id, role) VALUES ($1, (SELECT id FROM users WHERE handle = 'tess'), 'member') ON CONFLICT DO NOTHING`, [tessOrgId.id]);
     const add = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle: "zed" }),
+      body: JSON.stringify({ handle: "tess" }),
     });
     expect(add.ok).toBe(true);
     const rm = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle: "zed" }),
+      body: JSON.stringify({ handle: "tess" }),
     });
     expect(rm.ok).toBe(true);
+
+    // Requests for non-members are rejected (their inbox would never show it).
+    const stranger = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "zed" }),
+    });
+    expect(stranger.status).toBe(400);
 
     // Requesting review from the author is rejected.
     const selfReq = await sfetch(`/api/corp/grep-repo/pulls/${prNum}/reviewers`, {

@@ -166,9 +166,13 @@ export async function setProtectedBranches(gitDir: string, branches: string[]): 
 }
 
 /** Run git in the bare repo. All args are passed by this package's typed helpers only. */
-export async function gitIn(gitDir: string, args: string[], opts?: { stdin?: string; maxBuffer?: number }): Promise<string> {
+export async function gitIn(gitDir: string, args: string[], opts?: { stdin?: string; maxBuffer?: number; timeoutMs?: number }): Promise<string> {
   const { stdout } = await exec("git", args, {
     cwd: gitDir,
+    // Hard cap so no single git invocation (e.g. a pathological grep
+    // pattern before the -e backstop existed) can wedge the shared
+    // web+worker process indefinitely.
+    timeout: opts?.timeoutMs ?? 30_000,
     maxBuffer: opts?.maxBuffer ?? 1024 * 1024 * 64,
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",

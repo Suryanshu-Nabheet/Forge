@@ -21,6 +21,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   if (q.length > MAX_PATTERN) {
     return NextResponse.json({ error: `pattern too long (max ${MAX_PATTERN})` }, { status: 400 });
   }
+  // SECURITY: reject flag-shaped patterns; git grep has an -e backstop too,
+  // but a leading dash should never survive input validation.
+  if (q.startsWith("-")) return NextResponse.json({ error: "pattern may not start with '-'" }, { status: 400 });
 
   const branches = await listBranchesDb(info.repoId);
   const branch = body.ref && branches.includes(body.ref) ? body.ref : info.defaultBranch;

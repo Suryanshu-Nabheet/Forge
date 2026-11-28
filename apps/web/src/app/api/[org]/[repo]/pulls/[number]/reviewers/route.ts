@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { db, pullRequests, prReviewRequests, users, activities } from "@forge/db";
+import { db, pullRequests, prReviewRequests, users, activities, orgMembers } from "@forge/db";
 import { requireWritableRepo } from "@/server/authz";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
@@ -49,6 +49,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   if (!target) return NextResponse.json({ error: `no user with handle "${handle}"` }, { status: 404 });
   if (target.id === pr.authorId) {
     return NextResponse.json({ error: "cannot request review from the PR author" }, { status: 400 });
+  }
+  // Only org members can be requested: a stranger's inbox filters to
+  // their own orgs, so a request outside the org would silently do
+  // nothing. Reject it instead of pretending.
+  const memberRow = (await db
+    .select({ id: orgMembers.id })
+    .from(orgMembers)
+    .where(and(eq(orgMembers.orgId, gate.repo.orgId), eq(orgMembers.userId, target.id)))
+    .limit(1))[0];
+  if (!memberRow && gate.repo.orgId !== undefined) {
+    // org owner counts too
+    const { organizations } = await import("@forge/db");
+    const org = (await db.select({ ownerId: organizations.ownerId }).from(organizations).where(eq(organizations.id, gate.repo.orgId)).limit(1))[0];
+    if (!org || org.ownerId !== target.id) {
+      return NextResponse.json({ error: "user is not a member of this organization" }, { status: 400 });
+    }
   }
 
   await db.insert(prReviewRequests)

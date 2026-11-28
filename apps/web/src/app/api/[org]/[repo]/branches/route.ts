@@ -36,10 +36,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   if (protectedList.includes(branch)) {
     return NextResponse.json({ error: "protected branches cannot be deleted" }, { status: 403 });
   }
+  // The default branch is undeletable even if an owner emptied the
+  // protection list (the UI already hides it; enforce server-side).
+  if (branch === r.defaultBranch) {
+    return NextResponse.json({ error: "the default branch cannot be deleted" }, { status: 403 });
+  }
 
   const gitDir = repoGitDir(org, repo);
-  const exists = await revParse(gitDir, branch);
-  if (!exists) return NextResponse.json({ error: "branch not found" }, { status: 404 });
+  // Existence via the exact ref: rev-parse resolves tags/shas too, and
+  // update-ref -d exits 0 for a nonexistent branch whose name matches a
+  // tag — "deleting" a tag name and orphaning the activity row.
+  const refExists = await revParse(gitDir, `refs/heads/${branch}`);
+  if (!refExists) return NextResponse.json({ error: "branch not found" }, { status: 404 });
 
   try {
     // Direct ref deletion on the bare repo (no working tree needed).

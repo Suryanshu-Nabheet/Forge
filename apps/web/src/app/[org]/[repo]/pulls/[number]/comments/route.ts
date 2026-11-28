@@ -24,23 +24,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
   const pr = prRows[0];
   if (!pr) return NextResponse.json({ error: "pr not found" }, { status: 404 });
 
-  // Replies must stay within this PR's comment set.
+  // Replies must stay within this PR's comment set; they inherit the
+  // parent's diff anchor so they render inside the same inline thread.
+  let anchor: { path: string | null; line: number | null; side: "old" | "new" } = {
+    path: body.path ?? null,
+    line: body.line ?? null,
+    side: body.side ?? "new",
+  };
   if (body.inReplyTo !== undefined) {
     if (!Number.isInteger(body.inReplyTo)) return NextResponse.json({ error: "invalid inReplyTo" }, { status: 400 });
     const parent = (await db
-      .select({ id: reviewComments.id })
+      .select({ id: reviewComments.id, path: reviewComments.path, line: reviewComments.line, side: reviewComments.side })
       .from(reviewComments)
       .where(and(eq(reviewComments.id, body.inReplyTo), eq(reviewComments.prId, pr.id)))
       .limit(1))[0];
     if (!parent) return NextResponse.json({ error: "parent comment not found on this PR" }, { status: 400 });
+    anchor = { path: parent.path, line: parent.line, side: parent.side ?? "new" };
   }
 
   const [comment] = await db.insert(reviewComments).values({
     prId: pr.id,
     inReplyTo: body.inReplyTo ?? null,
-    path: body.path ?? null,
-    line: body.line ?? null,
-    side: body.side ?? "new",
+    path: anchor.path,
+    line: anchor.line,
+    side: anchor.side,
     body: text,
     kind: "human",
     authorId: user.id,

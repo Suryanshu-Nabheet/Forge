@@ -128,11 +128,13 @@ interface ClaimedJob {
 }
 
 async function claimJobs(): Promise<ClaimedJob[]> {
-  // Reclaim jobs stuck in 'active' (worker died mid-run) after a grace period.
+  // Reclaim jobs stuck in 'active' after a grace period. No self-exclusion:
+  // a LIVE worker that stranded a job (transient DB error, run-insert
+  // fallback) must also get its own stuck rows back — waiting for a
+  // process restart loses the job on single-process deployments.
   await db.execute(sql`
     UPDATE job_queue SET status = 'queued', locked_at = NULL, locked_by = NULL
     WHERE status = 'active' AND locked_at < now() - interval '10 minutes'
-      AND locked_by <> ${WORKER_ID}
   `);
 
   // Atomic claim: FOR UPDATE SKIP LOCKED via a single UPDATE ... RETURNING.

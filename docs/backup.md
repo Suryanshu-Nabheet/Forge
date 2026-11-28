@@ -5,8 +5,10 @@ Forge state lives in two places that must be snapshotted together:
 1. **Postgres** — users, sessions, PRs, intents, releases, queue, embeddings, audit log.
 2. **`FORGE_STORAGE_ROOT`** — bare git repos (the actual code) and the SSH host key.
 
-`scripts/backup.sh` takes a Postgres advisory lock, then produces a
-timestamped `db-*.sql.gz` + `repos-*.tar.gz` pair:
+`scripts/backup.sh` produces a timestamped `db-*.sql.gz` + `repos-*.tar.gz`
+pair. The two halves are not atomic against pushes — for a strictly
+consistent pair, stop the app first or snapshot volumes; the script is
+the portable baseline:
 
 ```bash
 DATABASE_URL=postgresql://forge:forge@localhost:5432/forge \

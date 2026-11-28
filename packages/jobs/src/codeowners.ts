@@ -21,16 +21,30 @@ function parseOwners(rule: string): string[] {
     .filter(Boolean);
 }
 
-/** Compile a CODEOWNERS path pattern to a RegExp (gitignore-style subset). */
+/**
+ * Compile a CODEOWNERS path pattern to a RegExp (gitignore-style subset).
+ * SECURITY: the pattern is attacker-controlled (any org member can push a
+ * CODEOWNERS file), so it must never be interpolated raw into a RegExp —
+ * `(a+)+$` as a pattern would backtrack catastrophically and freeze the
+ * in-process worker (and with it the web server). Strategy: protect the
+ * two legal metasequences (`**`, `*`) with placeholders, escape EVERY
+ * other character as a literal, then substitute the placeholders back.
+ * The result is linear-time by construction.
+ */
 function patternToRegex(pattern: string): RegExp {
   let p = pattern.replace(/^\/+/, ""); // leading / = repo root; strip for match()
-  // `**/` … matches at any depth.
+  const DSTAR = "\u0000D", STAR = "\u0000S"; // placeholders not legal in paths
+  p = p.replace(/\*\*/g, DSTAR);
+  p = p.replace(/\*/g, STAR);
+  // Escape every regex metacharacter in what remains (attacker text).
+  p = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Restore the two legal wildcards, longest first.
+  p = p.split(DSTAR).join("**"); // recombined below
+  p = p.split(STAR).join("*");
+  // Translate wildcards: **/ = any depth; /** = dir tree; ** = span; * = segment.
   p = p.replace(/\*\*\//g, "(?:.*/)?");
-  // `/**` at the end = everything under the dir.
   p = p.replace(/\/\*\*$/, "/.*");
-  // Remaining `**` behave like `*` spanning separators.
   p = p.replace(/\*\*/g, ".*");
-  // `*` matches within a path segment.
   p = p.replace(/\*/g, "[^/]*");
   return new RegExp(`^${p}`);
 }

@@ -40,13 +40,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ org: s
     update.title = title;
   }
   if (body.description !== undefined) {
-    update.description = body.description.trim() || null;
+    const description = body.description.trim();
+    if (description.length > 20000) {
+      return NextResponse.json({ error: "description too long (max 20000)" }, { status: 400 });
+    }
+    update.description = description || null;
   }
   if (body.status !== undefined) {
     if (body.status !== "open" && body.status !== "closed") {
       return NextResponse.json({ error: "status must be open or closed" }, { status: 400 });
     }
-    // done/merge_ready statuses are owned by the PR pipeline.
+    // State machine: 'done' is owned by the PR pipeline (merge / Fixes #n)
+    // and must not be hand-reopened; a closed done-intent stays done.
+    // Any other state may move to closed; only closed may reopen.
+    if (intent.status === "done") {
+      return NextResponse.json({ error: "intent is done (merged) — its lifecycle is owned by the PR pipeline" }, { status: 409 });
+    }
+    if (body.status === "open" && intent.status !== "closed") {
+      return NextResponse.json({ error: "intent is not closed" }, { status: 409 });
+    }
     update.status = body.status;
     update.closedAt = body.status === "closed" ? new Date() : null;
   }

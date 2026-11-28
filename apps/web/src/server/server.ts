@@ -2,7 +2,6 @@
 // This is the single process story: `pnpm dev` boots web + git + workers together.
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
-import { createGzip, type Gzip } from "node:zlib";
 import { timingSafeEqual } from "node:crypto";
 import nextFactory from "next";
 
@@ -134,8 +133,11 @@ async function main() {
         return;
       }
 
-      // 4. Everything else → Next.js, gzipped for compressible types.
-      await nextHandler(req, withGzip(req, res));
+      // 4. Everything else → Next.js. (Compression is handled at the
+      // proxy layer — nginx/caddy — in every supported deployment; an
+      // in-process writeHead interceptor measured as never engaging on
+      // Next 15's response paths and was removed after adversarial review.)
+      await nextHandler(req, res);
     } catch (err) {
       console.error("[server] request error:", err);
       if (!res.headersSent) {
@@ -183,53 +185,6 @@ function safeTokenEqual(presented: string, expected: string): boolean {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
-/**
- * Transparent gzip for Next.js-served responses. Installs a compression
- * stream by intercepting writeHead/write/end before the handler runs:
- * compressible content types get Content-Encoding: gzip and the original
- * Content-Length dropped (compressed size differs). SSE, git protocol,
- * health, and hook paths never pass through here.
- */
-function withGzip(req: IncomingMessage, res: ServerResponse): ServerResponse {
-  const accepts = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
-  if (!accepts) return res;
-
-  const rawWriteHead = res.writeHead.bind(res);
-  const rawWrite = res.write.bind(res);
-  const rawEnd = res.end.bind(res);
-  let gz: Gzip | null = null;
-
-  res.writeHead = ((status: number, headers?: Record<string, unknown> | ServerResponse) => {
-    const merged = typeof headers === "object" && headers !== null
-      ? { ...headers as Record<string, unknown> }
-      : {};
-    const type = String(merged["Content-Type"] ?? merged["content-type"] ?? "");
-    const alreadyEncoded = "Content-Encoding" in merged || "content-encoding" in merged;
-    if (/^(text\/|application\/(json|javascript|xml)|image\/svg)/.test(type) && !alreadyEncoded) {
-      gz = createGzip({ level: 6 });
-      gz.on("data", (chunk) => rawWrite(chunk));
-      gz.on("end", () => rawEnd());
-      delete merged["Content-Length"];
-      delete merged["content-length"];
-      merged["Content-Encoding"] = "gzip";
-      merged["Vary"] = [merged["Vary"], "Accept-Encoding"].filter(Boolean).join(", ");
-    }
-    return rawWriteHead(status, merged as never);
-  }) as typeof res.writeHead;
-
-  res.write = ((chunk: never) => (gz ? gz.write(chunk) : rawWrite(chunk))) as typeof res.write;
-  res.end = ((chunk?: never) => {
-    if (gz) {
-      if (chunk) gz.write(chunk);
-      gz.end();
-      return res;
-    }
-    return rawEnd(chunk);
-  }) as typeof res.end;
-
-  return res;
-}
-
 function readBody(req: import("node:http").IncomingMessage, limit = 10 * 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -263,6 +218,10 @@ let pubPublisher: PubSubLike | null = null;
 let pubInit: Promise<PubSubLike | null> | null = null;
 
 const SSE_CHANNEL = "forge:sse";
+// Frame origin: each replica stamps its pid so its own subscriber can skip
+// frames it published (local clients were already served directly —
+// without this filter every event is delivered twice per replica).
+const SSE_ORIGIN_PID = process.pid;
 
 async function getSsePublisher(): Promise<PubSubLike | null> {
   if (pubPublisher) return pubPublisher;
@@ -285,7 +244,11 @@ async function getSsePublisher(): Promise<PubSubLike | null> {
         await sub.subscribe(SSE_CHANNEL).catch(() => null);
         sub.on("message", (_channel: string, message: string) => {
           try {
-            const parsed = JSON.parse(message) as { channel: string; event: string; data: unknown };
+            const parsed = JSON.parse(message) as { origin: number; channel: string; event: string; data: unknown };
+            if (parsed.origin === SSE_ORIGIN_PID) return; // our own publish — already delivered locally
+            // SSE event names are validated: peers (or anyone with Redis
+            // write access) must not inject \n into the frame.
+            if (!/^[\w.-]+$/.test(parsed.event)) return;
             deliverLocal(parsed.channel, parsed.event, parsed.data);
           } catch { /* malformed frame from a peer — ignore */ }
         });
@@ -315,7 +278,7 @@ export function ssePublish(channel: string, event: string, data: unknown): void 
   // Fire-and-forget fanout; Redis-less or failed publishes are fine.
   void getSsePublisher().then((pub) => {
     if (!pub) return;
-    const message = JSON.stringify({ channel, event, data });
+    const message = JSON.stringify({ origin: SSE_ORIGIN_PID, channel, event, data });
     void pub.publish(SSE_CHANNEL, message).catch(() => {});
   });
 }

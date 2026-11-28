@@ -13,9 +13,10 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 mkdir -p "$OUTDIR"
 
-# Advisory lock: post-receive callbacks wait briefly rather than writing
-# refs mid-tar. (Hook DB sync is already async; the lock keeps the REPO
-# DIR itself quiet, which is the half we snapshot.)
+# NOTE on consistency: the push path does NOT take this advisory lock —
+# pushes can land mid-tar. For a consistent pair, pause the app first
+# (docker compose stop web) or use volume-level snapshots; this script
+# is the portable baseline and pairs a slightly-skewed db+repos tuple.
 psql "$DATABASE_URL" -c "SELECT pg_advisory_lock(918273645);" >/dev/null
 trap 'psql "$DATABASE_URL" -c "SELECT pg_advisory_unlock(918273645);" >/dev/null' EXIT
 

@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
-import { db, pullRequests, activities } from "@forge/db";
+import { db, pullRequests, activities, intents } from "@forge/db";
 import { requireWritableRepo, findVisibleRepo } from "@/server/authz";
 import { repoGitDir, revParse, listBranches } from "@forge/git";
 import { dispatchWebhookEvent } from "@forge/jobs";
@@ -102,6 +102,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     }
   }
   if (!pr) return NextResponse.json({ error: "pr creation failed" }, { status: 500 });
+
+  // Mirror the auto-PR path: link the intent both ways so the intent
+  // page shows its PR and status flips to in_review.
+  if (intentId) {
+    await db.update(intents)
+      .set({ linkedPrId: pr.id, status: "in_review", updatedAt: new Date() })
+      .where(eq(intents.id, intentId));
+  }
 
   await db.insert(activities).values({
     repoId: r.repoId,

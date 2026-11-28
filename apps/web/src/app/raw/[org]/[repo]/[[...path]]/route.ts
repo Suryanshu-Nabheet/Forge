@@ -20,7 +20,13 @@ const CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8",
   json: "application/json", csv: "text/csv", ts: "text/plain; charset=utf-8",
   tsx: "text/plain; charset=utf-8", js: "text/plain; charset=utf-8",
-  css: "text/css", html: "text/html; charset=utf-8",
+  css: "text/css",
+  // SECURITY: html is forced to text/plain. Serving attacker-controlled
+  // HTML same-origin (or SVG on direct navigation) executes script in the
+  // Forge origin — session-bearing APIs become callable as the victim.
+  // SVG keeps its type only because <img src=...> embedding cannot script
+  // AND every raw response carries a sandboxing CSP below.
+  html: "text/plain; charset=utf-8",
 };
 
 export async function GET(req: Request, { params }: { params: Promise<{ org: string; repo: string; path?: string[] }> }) {
@@ -63,6 +69,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ org: str
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
   const inline = url.searchParams.get("download") !== "1";
 
+  const safeName = (filePath.split("/").pop() ?? "file").replace(/["\\]/g, "_");
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": contentType,
@@ -70,7 +77,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ org: str
       // Content-addressed by (ref, path): short shared caching is safe and
       // lets images/permalinks load fast without re-reading git.
       "Cache-Control": "private, max-age=60",
-      ...(inline ? {} : { "Content-Disposition": `attachment; filename="${filePath.split("/").pop()}"` }),
+      // SECURITY: neutralize any active content no matter its type. `sandbox`
+      // makes the document an opaque origin (no script execution, no same-
+      // origin access) — belt and braces for svg, defense for anything we
+      // failed to classify.
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; media-src 'none'; img-src data:; sandbox",
+      ...(inline ? {} : { "Content-Disposition": `attachment; filename="${safeName}"` }),
     },
   });
 }

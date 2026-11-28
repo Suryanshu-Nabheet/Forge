@@ -9,7 +9,18 @@ import { createTag, revParse, repoGitDir } from "@forge/git";
 import { requireWritableRepo } from "@/server/authz";
 import { dispatchWebhookEvent } from "@forge/jobs";
 
-const TAG_NAME_RE = /^v?[0-9A-Za-z._-]{1,40}$/;
+const TAG_NAME_RE = /^v?[0-9A-Za-z._][0-9A-Za-z._-]{0,39}$/;
+// SECURITY: a leading dash makes git consume the tag name as an option
+// (-f force-creates a sha-named tag, -e edits, -u spawns gpg…), and a
+// bare 40-hex name poisons every rev-parse in the repo (git disambiguates
+// tags over branches). Both are hard-rejected; names must also start with
+// a letter/digit (the RE above) so they can never be flag-shaped or
+// sha-colliding, and must not collide with an existing branch.
+function tagGuards(tagName: string): string | null {
+  if (!TAG_NAME_RE.test(tagName)) return "tag name: 1-40 chars, must start with letter/digit/dot (optional leading v)";
+  if (/^[0-9a-f]{40}$/.test(tagName)) return "tag name cannot be a full commit sha (ambiguous for every rev-parse)";
+  return null;
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
@@ -38,14 +49,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
     targetRef?: string; // branch or sha; default = default branch head
     prerelease?: boolean;
   };
+  const gitDir = repoGitDir(org, repo);
   const tagName = (body.tagName ?? "").trim();
-  if (!TAG_NAME_RE.test(tagName)) {
-    return NextResponse.json({ error: "tag name: 1-40 chars, letters/digits/._- (optional leading v)" }, { status: 400 });
+  const tagProblem = tagGuards(tagName);
+  if (tagProblem) return NextResponse.json({ error: tagProblem }, { status: 400 });
+  // A tag whose name collides with a branch makes rev-parse ambiguous
+  // (git prefers tags) — silently corrupting default-branch resolution.
+  const { listBranches } = await import("@forge/git");
+  if ((await listBranches(gitDir)).includes(tagName)) {
+    return NextResponse.json({ error: "a branch with this name exists — tag would shadow it in every rev-parse" }, { status: 409 });
   }
   const name = (body.name ?? tagName).trim();
   if (!name) return NextResponse.json({ error: "release name required" }, { status: 400 });
 
-  const gitDir = repoGitDir(org, repo);
   const targetRef = (body.targetRef ?? "").trim() || r.defaultBranch;
   const targetSha = await revParse(gitDir, targetRef);
   if (!targetSha) return NextResponse.json({ error: `cannot resolve target: ${targetRef}` }, { status: 400 });

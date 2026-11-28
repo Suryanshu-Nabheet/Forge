@@ -282,7 +282,11 @@ export async function grepTree(
   opts?: { regex?: boolean; maxResults?: number; maxLineLength?: number },
 ): Promise<GrepMatch[]> {
   const maxResults = opts?.maxResults ?? 200;
-  const args = ["grep", "-n", "-I", "--full-name", opts?.regex ? "-E" : "-F", pattern, rev];
+  // SECURITY: `-e` marks the pattern as a value, never a flag — without it,
+  // a pattern like `-f/dev/zero` turns git grep into an unbounded reader
+  // that hangs the calling process. Callers additionally reject leading
+  // dashes; this is the structural backstop.
+  const args = ["grep", "-n", "-I", "--full-name", opts?.regex ? "-E" : "-F", "-e", pattern, rev];
   let out: string;
   try {
     out = await gitIn(gitDir, args, { maxBuffer: 1024 * 1024 * 16 });

@@ -41,13 +41,14 @@ function visFilterFor(user: Awaited<ReturnType<typeof currentUser>>) {
 }
 
 /** Grep the N most recently updated visible repos (bounded work per request). */
-async function grepAcrossVisible(q: string, regex: boolean, visFilter: ReturnType<typeof visFilterFor>) {
+async function grepAcrossVisible(q: string, regex: boolean, visFilter: ReturnType<typeof visFilterFor>, repoId?: number) {
   const { grepTree, revParse, repoGitDir } = await import("@forge/git");
+  const scoped = repoId ? and(eq(repositories.id, repoId), visFilter) : visFilter;
   const repos = await db
     .select({ orgSlug: organizations.slug, name: repositories.name, defaultBranch: repositories.defaultBranch })
     .from(repositories)
     .innerJoin(organizations, eq(organizations.id, repositories.orgId))
-    .where(visFilter)
+    .where(scoped)
     .orderBy(desc(repositories.updatedAt))
     .limit(Number(process.env.FORGE_GREP_REPOS ?? 20));
 
@@ -86,7 +87,11 @@ export async function POST(req: Request) {
   // Literal/regex mode: grep the most recently updated visible repos
   // (bounded), returning per-file matches. Semantic mode continues below.
   if (body.mode === "literal") {
-    return grepAcrossVisible(q, body.regex === true, visFilterFor(user));
+    if (q.startsWith("-")) {
+      return NextResponse.json({ error: "pattern may not start with '-'" }, { status: 400 });
+    }
+    const filter = visFilterFor(user);
+    return grepAcrossVisible(q, body.regex === true, filter, body.repoId);
   }
 
   const visFilter = visFilterFor(user);
