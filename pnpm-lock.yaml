@@ -216,6 +216,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
+      ioredis:
+        specifier: ^6.1.0
+        version: 6.1.0
       lucide-react:
         specifier: ^0.552.0
         version: 0.552.0(react@19.2.1)

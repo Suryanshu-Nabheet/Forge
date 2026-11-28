@@ -248,13 +248,76 @@ function readBody(req: import("node:http").IncomingMessage, limit = 10 * 1024 * 
 // ---- SSE plumbing: channels keyed by subject (e.g. /api/sse/pr-12) ----
 const sseClients = new Map<string, Set<import("node:http").ServerResponse>>();
 
-export function ssePublish(channel: string, event: string, data: unknown): void {
+// ---------- Redis pub/sub fanout (multi-replica) ----------
+// With REDIS_URL set, publishes also go to a Redis channel and every
+// replica's subscriber bridges them into its local SSE clients — so live
+// logs stream no matter which replica runs the job worker. Without
+// Redis, publishing stays local (single-process topology).
+
+interface PubSubLike {
+  publish(channel: string, message: string): Promise<number>;
+  duplicate(): PubSubLike & { subscribe(channel: string): Promise<unknown>; on(event: string, cb: (msg: unknown) => void): unknown };
+}
+
+let pubPublisher: PubSubLike | null = null;
+let pubInit: Promise<PubSubLike | null> | null = null;
+
+const SSE_CHANNEL = "forge:sse";
+
+async function getSsePublisher(): Promise<PubSubLike | null> {
+  if (pubPublisher) return pubPublisher;
+  if (!pubInit) {
+    pubInit = (async () => {
+      if (!process.env.REDIS_URL) return null;
+      try {
+        const mod = await import("ioredis");
+        const pub = new mod.default(process.env.REDIS_URL, {
+          maxRetriesPerRequest: 1,
+          connectTimeout: 2000,
+          lazyConnect: false,
+        });
+        pub.on("error", (err) => console.error("[sse] redis publisher error:", err.message));
+        await pub.connect().catch(() => null);
+        // Subscriber: a dedicated connection (Redis requires one per mode).
+        const sub = pub.duplicate();
+        sub.on("error", (err) => console.error("[sse] redis subscriber error:", err.message));
+        await sub.connect().catch(() => null);
+        await sub.subscribe(SSE_CHANNEL).catch(() => null);
+        sub.on("message", (_channel: string, message: string) => {
+          try {
+            const parsed = JSON.parse(message) as { channel: string; event: string; data: unknown };
+            deliverLocal(parsed.channel, parsed.event, parsed.data);
+          } catch { /* malformed frame from a peer — ignore */ }
+        });
+        console.log("[sse] redis fanout enabled");
+        return pub as unknown as PubSubLike;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  pubPublisher = await pubInit;
+  return pubPublisher;
+}
+
+/** Deliver a frame to this process's local subscribers only. */
+function deliverLocal(channel: string, event: string, data: unknown): void {
   const clients = sseClients.get(channel);
   if (!clients) return;
   const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) {
     res.write(frame);
   }
+}
+
+export function ssePublish(channel: string, event: string, data: unknown): void {
+  deliverLocal(channel, event, data);
+  // Fire-and-forget fanout; Redis-less or failed publishes are fine.
+  void getSsePublisher().then((pub) => {
+    if (!pub) return;
+    const message = JSON.stringify({ channel, event, data });
+    void pub.publish(SSE_CHANNEL, message).catch(() => {});
+  });
 }
 
 /** SSE auth: session cookie required; channel subjects verify repo read access. */
