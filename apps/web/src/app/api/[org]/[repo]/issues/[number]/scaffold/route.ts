@@ -14,6 +14,20 @@ import { repoGitDir } from "@forge/git";
 
 const exec = promisify(execFile);
 
+/**
+ * Join a plan-supplied (LLM-generated) relative path onto the worktree,
+ * rejecting absolute paths and anything that escapes the worktree root.
+ * Returns null when the path is unsafe.
+ */
+function safeJoin(root: string, rel: string): string | null {
+  const cleaned = rel.replace(/\\/g, "/").trim();
+  if (cleaned.startsWith("/") || /^[a-zA-Z]:/.test(cleaned)) return null;
+  const abs = path.join(root, cleaned);
+  const normalizedRoot = path.resolve(root);
+  if (!path.resolve(abs).startsWith(normalizedRoot + path.sep)) return null;
+  return abs;
+}
+
 export async function POST(_req: Request, { params }: { params: Promise<{ org: string; repo: string; number: string }> }) {
   const { org, repo, number } = await params;
   const num = Number(number);
@@ -49,7 +63,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ org: s
         : "") +
         `\n---\n_Scaffolded by Forge spec-to-PR workflow._\n`;
     const specPath = intent.plan?.filesToCreate.find((f) => f.path.endsWith(".md"))?.path ?? `docs/intents/${slug}.md`;
-    const abs = path.join(work, specPath);
+    const abs = safeJoin(work, specPath);
+    if (!abs) return NextResponse.json({ error: "plan spec path escapes the repository" }, { status: 400 });
     await exec("mkdir", ["-p", path.dirname(abs)]);
     await writeFile(abs, spec);
     await exec("git", ["-C", work, "add", "."]);

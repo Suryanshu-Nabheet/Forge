@@ -35,6 +35,10 @@ function gitHttpBackendPath(): string {
 const GIT_HTTP_BACKEND = gitHttpBackendPath();
 const REPO_URL_RE = /^([a-z0-9][a-z0-9-]{0,38})\/([a-z0-9][a-z0-9_.-]{0,99})\.git(\/.*)?$/;
 
+// Only these suffixes may follow /git/<org>/<repo>.git in a smart-HTTP URL.
+// Anything else is rejected before it can reach git http-backend's PATH_INFO.
+const GIT_REST_RE = /^\/(info\/refs|HEAD|objects\/info\/alternates|objects\/info\/http-alternates|objects\/info\/packs|git-upload-pack|git-receive-pack)$/;
+
 export interface GitAuthResult {
   userId: number | null;
   scopes: string[];
@@ -61,7 +65,10 @@ export function parseGitUrl(pathname: string): { orgSlug: string; repoName: stri
   const rest = pathname.slice("/git/".length);
   const m = REPO_URL_RE.exec(rest);
   if (!m) return null;
-  return { orgSlug: m[1]!, repoName: m[2]!, rest: m[3] ?? "" };
+  const suffix = m[3] ?? "";
+  // Whitelist the protocol endpoints; a bare repo URL (clone) is also fine.
+  if (suffix !== "" && !GIT_REST_RE.test(suffix)) return null;
+  return { orgSlug: m[1]!, repoName: m[2]!, rest: suffix };
 }
 
 interface RepoLookup {
@@ -122,7 +129,9 @@ export async function handleGitRequest(req: IncomingMessage, res: ServerResponse
   }
 
   // Private repos: PAT holder must be a member of the owning org.
-  if (repo.visibility === "private") {
+  // Pushes require org membership for every repo (public or private),
+  // mirroring the SSH transport's write policy.
+  if (repo.visibility === "private" || isPush) {
     if (auth.userId === null) {
       res.setHeader("WWW-Authenticate", 'Basic realm="forge-git", charset="UTF-8"');
       res.writeHead(401, { "Content-Type": "text/plain" });

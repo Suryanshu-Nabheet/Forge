@@ -157,31 +157,53 @@ export function ssePublish(channel: string, event: string, data: unknown): void 
   }
 }
 
-/** SSE auth: session cookie required; PR channels also verify repo read access. */
+/** SSE auth: session cookie required; channel subjects verify repo read access. */
 async function authorizeSse(req: import("node:http").IncomingMessage, pathname: string): Promise<boolean> {
-  const { userFromSessionToken } = await import("@forge/db");
-  const { db, pullRequests, repositories, organizations, orgMembers } = await import("@forge/db");
+  const { userFromSessionToken, db, pullRequests, jobRuns, repositories, orgMembers } = await import("@forge/db");
   const { and, eq } = await import("drizzle-orm");
 
   // Extract the session cookie from the raw header (no Next context here).
   const cookieHeader = String(req.headers.cookie ?? "");
   const match = /(?:^|;\s*)forge_session=([^;]+)/.exec(cookieHeader);
   if (!match) return false;
-  const user = await userFromSessionToken(decodeURIComponent(match[1]!));
+  let token: string;
+  try {
+    token = decodeURIComponent(match[1]!);
+  } catch {
+    return false;
+  }
+  const user = await userFromSessionToken(token);
   if (!user) return false;
 
   const channel = pathname.replace(/^\/api\/sse\//, "");
-  const prMatch = /^pr-(\d+)$/.exec(channel);
-  if (!prMatch) return true; // authenticated non-PR channels pass
 
-  const prId = Number(prMatch[1]);
-  const rows = await db
-    .select({ orgId: repositories.orgId, visibility: repositories.visibility })
-    .from(pullRequests)
-    .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
-    .where(eq(pullRequests.id, prId))
-    .limit(1);
-  const repo = rows[0];
+  // Resolve the channel subject to a repo, then apply the read policy.
+  let repo: { orgId: number; visibility: string } | undefined;
+  const prMatch = /^pr-(\d+)$/.exec(channel);
+  const jobMatch = /^job-(\d+)$/.exec(channel);
+  if (prMatch) {
+    const rows = await db
+      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .from(pullRequests)
+      .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
+      .where(eq(pullRequests.id, Number(prMatch[1])))
+      .limit(1);
+    repo = rows[0];
+  } else if (jobMatch) {
+    const rows = await db
+      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .from(jobRuns)
+      .innerJoin(repositories, eq(repositories.id, jobRuns.repoId))
+      .where(eq(jobRuns.id, Number(jobMatch[1])))
+      .limit(1);
+    repo = rows[0];
+  } else if (channel === "pr-activity") {
+    // Fanout channel carrying only (runId, prId) ticks, not content; any
+    // authenticated user may listen.
+    return true;
+  } else {
+    return false;
+  }
   if (!repo) return false;
   if (repo.visibility === "public") return true;
   const member = await db
