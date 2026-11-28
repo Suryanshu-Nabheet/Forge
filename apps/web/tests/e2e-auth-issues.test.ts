@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
+import { adminDsn, testDbDsn } from "./helpers/db";
 
 const exec = promisify(execFile);
 
@@ -16,7 +17,7 @@ const ROOT = process.cwd();
 const DATA = `${ROOT}/data-test2`;
 
 let server: ReturnType<typeof spawn> | null = null;
-const db = new pg.Client({ connectionString: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` });
+const db = new pg.Client({ connectionString: testDbDsn(TEST_DB) });
 
 // Minimal cookie-jar fetch wrapper
 function jarFetch(jar: { cookie: string }) {
@@ -50,14 +51,14 @@ async function sql(q: string, params?: unknown[]) {
 
 beforeAll(async () => {
   // Fresh DB for this suite
-  const admin = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const admin = new pg.Client({ connectionString: adminDsn() });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE);`);
   await admin.query(`CREATE DATABASE ${TEST_DB};`);
   await admin.end();
   await exec("pnpm", ["exec", "drizzle-kit", "push"], {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` },
+    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB) },
   });
 
   // Wipe the storage root too: a stale bare repo survives DB resets and
@@ -72,7 +73,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       FORGE_PORT: String(PORT),
-      DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}`,
+      DATABASE_URL: testDbDsn(TEST_DB),
       FORGE_STORAGE_ROOT: DATA,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -89,7 +90,7 @@ afterAll(async () => {
   await db.end().catch(() => {});
   // Give the OS a beat to release DB connections, then drop.
   await new Promise((r) => setTimeout(r, 1500));
-  const admin = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const admin = new pg.Client({ connectionString: adminDsn() });
   await admin.connect();
   for (let i = 0; i < 5; i++) {
     try {

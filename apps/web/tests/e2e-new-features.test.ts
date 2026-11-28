@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
+import { adminDsn, testDbDsn } from "./helpers/db";
 
 const exec = promisify(execFile);
 
@@ -24,7 +25,7 @@ const DATA = `${ROOT}/data-test4`;
 
 let server: ReturnType<typeof spawn> | null = null;
 let hookServer: Server | null = null;
-const db = new pg.Client({ connectionString: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` });
+const db = new pg.Client({ connectionString: testDbDsn(TEST_DB) });
 
 interface Delivery {
   event: string | undefined;
@@ -68,14 +69,14 @@ async function waitForServer(timeoutMs = 90_000): Promise<void> {
 }
 
 beforeAll(async () => {
-  const admin = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const admin = new pg.Client({ connectionString: adminDsn() });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE);`);
   await admin.query(`CREATE DATABASE ${TEST_DB};`);
   await admin.end();
   await exec("pnpm", ["exec", "drizzle-kit", "push"], {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` },
+    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB) },
   });
   await exec("rm", ["-rf", DATA]);
   await db.connect();
@@ -101,7 +102,7 @@ beforeAll(async () => {
     detached: true,
     env: {
       ...process.env,
-      DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}`,
+      DATABASE_URL: testDbDsn(TEST_DB),
       FORGE_STORAGE_ROOT: DATA,
       FORGE_PORT: String(PORT),
       FORGE_SSH_PORT: String(SSH_PORT),

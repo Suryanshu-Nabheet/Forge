@@ -8,30 +8,31 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
+import { adminDsn, testDbDsn } from "./helpers/db";
 import { runProcessBuild } from "@forge/sandbox";
 import { initBareRepo, extractArchive, repoGitDir } from "@forge/git";
 
 const exec = promisify(execFile);
 
 const TEST_DB = "forge_queue_test";
-const db = new pg.Client({ connectionString: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` });
+const db = new pg.Client({ connectionString: testDbDsn(TEST_DB) });
 
 beforeAll(async () => {
-  const admin = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const admin = new pg.Client({ connectionString: adminDsn() });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE);`);
   await admin.query(`CREATE DATABASE ${TEST_DB};`);
   await admin.end();
   await exec("pnpm", ["exec", "drizzle-kit", "push"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` },
+    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB) },
   });
   await db.connect();
 }, 120_000);
 
 afterAll(async () => {
   await db.end().catch(() => {});
-  const admin = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const admin = new pg.Client({ connectionString: adminDsn() });
   await admin.connect();
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE);`).catch(() => {});
   await admin.end().catch(() => {});

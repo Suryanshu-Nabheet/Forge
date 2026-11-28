@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
+import { adminDsn, testDbDsn } from "./helpers/db";
 
 const exec = promisify(execFile);
 
@@ -15,7 +16,7 @@ export async function setup(): Promise<void> {
   } catch { /* none running */ }
 
   // Create the test database fresh.
-  const client = new pg.Client({ connectionString: "postgresql://suryanshunabheet@localhost:5432/postgres" });
+  const client = new pg.Client({ connectionString: adminDsn() });
   await client.connect();
   await client.query(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE);`);
   await client.query(`CREATE DATABASE ${DB};`);
@@ -30,11 +31,11 @@ export async function setup(): Promise<void> {
   // Push the Drizzle schema into it.
   await exec("pnpm", ["exec", "drizzle-kit", "push"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${DB}` },
+    env: { ...process.env, DATABASE_URL: testDbDsn(DB) },
   });
 
   // Cosine function (mirrors the one shipped for dev).
-  const c2 = new pg.Client({ connectionString: `postgresql://suryanshunabheet@localhost:5432/${DB}` });
+  const c2 = new pg.Client({ connectionString: testDbDsn(DB) });
   await c2.connect();
   await c2.query(`
     CREATE OR REPLACE FUNCTION cosine_distance(a real[], b real[]) RETURNS real AS $$

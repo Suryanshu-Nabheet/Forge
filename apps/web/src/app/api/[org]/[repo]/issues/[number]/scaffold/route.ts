@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { db, organizations, repositories, intents, intentLinks, activities } from "@forge/db";
+import { db, organizations, repositories, intents, intentLinks, activities, branches } from "@forge/db";
 import { repoGitDir } from "@forge/git";
 
 const exec = promisify(execFile);
@@ -70,6 +70,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ org: s
     await exec("git", ["-C", work, "add", "."]);
     await exec("git", ["-C", work, "-c", "user.name=forge-bot", "-c", "user.email=bot@forge.dev", "commit", "--quiet", "-m", `specs: scaffold intent #${num}`]);
     await exec("git", ["-C", work, "push", "--quiet", gitDir, `HEAD:refs/heads/${branchName}`]);
+
+    // The direct push to the bare repo path bypasses the post-receive hook,
+    // so sync the branch row + commit here (same shape as syncBranch).
+    const pushedSha = (await exec("git", ["--git-dir", gitDir, "rev-parse", branchName])).stdout.trim();
+    await db
+      .insert(branches)
+      .values({ repoId: r.repoId, name: branchName, commitSha: pushedSha, isDefault: false })
+      .onConflictDoUpdate({ target: [branches.repoId, branches.name], set: { commitSha: pushedSha, updatedAt: new Date() } });
 
     await db.update(intents).set({ branchName, status: "in_progress" }).where(eq(intents.id, intent.id));
     await db.insert(intentLinks).values({ intentId: intent.id, kind: "branch", value: branchName });

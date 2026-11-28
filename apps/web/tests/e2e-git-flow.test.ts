@@ -9,6 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
+import { adminDsn, testDbDsn } from "./helpers/db";
 
 const exec = promisify(execFile);
 
@@ -30,7 +31,7 @@ async function sfetch(path: string, init?: RequestInit): Promise<Response> {
     headers: { ...(init?.headers ?? {}), ...(cookie ? { cookie } : {}) },
   });
 }
-const db = new pg.Client({ connectionString: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}` });
+const db = new pg.Client({ connectionString: testDbDsn(TEST_DB) });
 
 async function waitForServer(timeoutMs = 90_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -73,7 +74,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       FORGE_PORT: String(PORT),
-      DATABASE_URL: `postgresql://suryanshunabheet@localhost:5432/${TEST_DB}`,
+      DATABASE_URL: testDbDsn(TEST_DB),
       FORGE_STORAGE_ROOT: DATA,
     },
     stdio: ["ignore", "pipe", "pipe"],
