@@ -12,6 +12,7 @@ import {
   real,
   index,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type {
   PrStatus,
@@ -80,8 +81,10 @@ export const reviewComments = pgTable(
   {
     id: serial("id").primaryKey(),
     prId: integer("pr_id")
-      .notNull()
       .references(() => pullRequests.id, { onDelete: "cascade" }),
+    intentId: integer("intent_id")
+      .references(() => intents.id, { onDelete: "cascade" }),
+    inReplyTo: integer("in_reply_to").references((): AnyPgColumn => reviewComments.id, { onDelete: "cascade" }),
     commitSha: text("commit_sha"),
     path: text("path"),
     line: integer("line"),
@@ -92,7 +95,11 @@ export const reviewComments = pgTable(
     authorId: integer("author_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("rc_pr_idx").on(t.prId)],
+  (t) => [
+    index("rc_pr_idx").on(t.prId),
+    index("rc_intent_idx").on(t.intentId),
+    index("rc_reply_idx").on(t.inReplyTo),
+  ],
 );
 
 export const intents = pgTable(

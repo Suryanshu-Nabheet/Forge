@@ -168,7 +168,28 @@ export async function prDiff(gitDir: string, baseSha: string | null, headSha: st
 }
 
 export async function prComments(prId: number) {
-  return db.select().from(reviewComments).where(eq(reviewComments.prId, prId)).orderBy(reviewComments.id);
+  return db
+    .select({
+      id: reviewComments.id,
+      prId: reviewComments.prId,
+      intentId: reviewComments.intentId,
+      inReplyTo: reviewComments.inReplyTo,
+      commitSha: reviewComments.commitSha,
+      path: reviewComments.path,
+      line: reviewComments.line,
+      side: reviewComments.side,
+      body: reviewComments.body,
+      kind: reviewComments.kind,
+      severity: reviewComments.severity,
+      authorId: reviewComments.authorId,
+      authorHandle: users.handle,
+      authorName: users.name,
+      createdAt: reviewComments.createdAt,
+    })
+    .from(reviewComments)
+    .leftJoin(users, eq(users.id, reviewComments.authorId))
+    .where(eq(reviewComments.prId, prId))
+    .orderBy(reviewComments.id);
 }
 
 export async function listApprovals(prId: number): Promise<Array<{ state: string; by: string }>> {

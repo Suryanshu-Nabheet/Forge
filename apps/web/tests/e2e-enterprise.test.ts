@@ -766,3 +766,92 @@ describe("intent management", () => {
     expect((aud.rows[0] as { n: number }).n).toBeGreaterThan(0);
   });
 });
+
+describe("comment threading + intent discussions", () => {
+  it("posts inline PR comments with replies, and intent discussion threads", async () => {
+    // Intent discussion: top-level + reply via the comments API.
+    const issueRes = await sfetch(`/api/corp/grep-repo/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Discussion target", description: "talk here" }),
+    });
+    const issue = (await issueRes.json()) as { number: number };
+    expect(issueRes.ok).toBe(true);
+
+    const c1 = await sfetch(`/api/corp/grep-repo/issues/${issue.number}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "First **comment**" }),
+    });
+    const c1Body = (await c1.json()) as { id: number };
+    expect(c1.ok).toBe(true);
+
+    const reply = await sfetch(`/api/corp/grep-repo/issues/${issue.number}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "A reply", inReplyTo: c1Body.id }),
+    });
+    expect(reply.ok).toBe(true);
+
+    // Cross-thread reply rejected.
+    const bad = await sfetch(`/api/corp/grep-repo/issues/${issue.number}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "bad", inReplyTo: 999999 }),
+    });
+    expect(bad.status).toBe(400);
+
+    // Threaded comments render on the page (reply nested under parent).
+    const page = await fetch(`${BASE}/corp/grep-repo/issues/${issue.number}`);
+    const html = await page.text();
+    expect(html).toContain("First <strong>comment</strong>");
+    expect(html).toContain("A reply");
+
+    // Inline PR comment with anchors + a threaded reply. The head branch
+    // must exist in grep-repo: push one.
+    const pat2 = await sfetch(`/api/pats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "t5", scopes: ["repo:read", "repo:write"] }),
+    });
+    const pat2Body = (await pat2.json()) as { token: string };
+    const push2 = `http://eva:${pat2Body.token}@localhost:${PORT}/git/corp/grep-repo.git`;
+    await git(["-C", work, "checkout", "--quiet", "greptest"]);
+    await exec("bash", ["-c", `cd ${work} && printf 'line a\nline b changed for the PR\n' > g.txt`]);
+    await git(["-C", work, "commit", "--all", "--quiet", "-m", "pr diff"]);
+    await git(["-C", work, "push", "--quiet", push2, "HEAD:refs/heads/greptest"]);
+
+    const pr = await sfetch(`/api/corp/grep-repo/pulls/new`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Comment target", head: "greptest", base: "main" }),
+    });
+    expect(pr.ok).toBe(true);
+    const prNum = ((await pr.json()) as { number: number }).number;
+
+    const inline = await sfetch(`/corp/grep-repo/pulls/${prNum}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "inline on g.txt line 1", path: "g.txt", line: 1, side: "new" }),
+    });
+    const inlineBody = (await inline.json()) as { id: number };
+    expect(inline.ok).toBe(true);
+
+    const inlineReply = await sfetch(`/corp/grep-repo/pulls/${prNum}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "threaded answer", inReplyTo: inlineBody.id }),
+    });
+    expect(inlineReply.ok).toBe(true);
+
+    // The PR page shows both, nested.
+    const prPage = await fetch(`${BASE}/corp/grep-repo/pulls/${prNum}`);
+    const prHtml = await prPage.text();
+    expect(prHtml).toContain("inline on g.txt line 1");
+    expect(prHtml).toContain("threaded answer");
+
+    // comment_posted activity feeds the inbox.
+    const act = await db.query(`SELECT count(*)::int AS n FROM activities WHERE type = 'comment_posted'`);
+    expect((act.rows[0] as { n: number }).n).toBeGreaterThanOrEqual(3);
+  });
+});

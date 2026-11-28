@@ -1,10 +1,11 @@
 import { findVisibleRepo, canWriteRepo } from "@/server/authz";
 import { currentUser } from "@/server/session";
 import { getIntent, intentLinksFor } from "@/server/api";
-import { db, pullRequests } from "@forge/db";
+import { db, pullRequests, reviewComments, users } from "@forge/db";
 import { eq } from "drizzle-orm";
 import { PlanActionsClient } from "@/components/PlanActionsClient";
 import { IntentSidebar } from "@/components/IntentSidebar";
+import { IntentDiscussion, type IntentComment } from "@/components/IntentDiscussion";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,23 @@ export default async function IntentPage({ params }: { params: Promise<{ org: st
   const links = await intentLinksFor(intent.id);
   const user = await currentUser();
   const canEdit = user ? await canWriteRepo(info.orgId, user.id) : false;
+  const commentRows = await db
+    .select({
+      id: reviewComments.id,
+      body: reviewComments.body,
+      inReplyTo: reviewComments.inReplyTo,
+      authorHandle: users.handle,
+      authorName: users.name,
+      createdAt: reviewComments.createdAt,
+    })
+    .from(reviewComments)
+    .leftJoin(users, eq(users.id, reviewComments.authorId))
+    .where(eq(reviewComments.intentId, intent.id))
+    .orderBy(reviewComments.id);
+  const intentComments: IntentComment[] = commentRows.map((c) => ({
+    ...c,
+    createdAt: c.createdAt.toISOString(),
+  }));
   const linkedPrRow = intent.linkedPrId
     ? (await db.select().from(pullRequests).where(eq(pullRequests.id, intent.linkedPrId)).limit(1))[0]
     : null;
@@ -99,6 +117,7 @@ export default async function IntentPage({ params }: { params: Promise<{ org: st
           ))}
         </div>
       )}
+        <IntentDiscussion org={org} repo={repo} number={intent.number} initial={intentComments} />
       </div>
       {canEdit && (
         <aside className="lg:col-span-1 space-y-4">

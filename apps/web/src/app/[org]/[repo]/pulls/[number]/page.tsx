@@ -5,6 +5,7 @@ import { prRiskColor, riskLabel } from "@/components/risk";
 import { PrActions } from "@/components/PrActions";
 import { Markdown } from "@/components/Markdown";
 import { LiveLogs } from "@/components/LiveLogs";
+import { DiffCommentBox } from "@/components/DiffCommentBox";
 
 export const dynamic = "force-dynamic";
 
@@ -92,7 +93,7 @@ export default async function PrPage({ params }: { params: Promise<{ org: string
       <div className="space-y-4">
         {diff.length === 0 && <div className="card p-6 text-center text-[var(--text-dim)] text-[13px]">No changes or diff unavailable.</div>}
         {diff.map((f) => (
-          <DiffFileCard key={f.path} file={f} comments={aiComments.concat(humanComments)} />
+          <DiffFileCard key={f.path} file={f} comments={aiComments.concat(humanComments)} org={org} repo={repo} number={pr.number} />
         ))}
       </div>
 
@@ -140,9 +141,10 @@ function PreviewStatus({ status, adapter }: { status: string; adapter: string })
   );
 }
 
-function DiffFileCard({ file, comments }: {
+function DiffFileCard({ file, comments, org, repo, number }: {
   file: import("@forge/shared").DiffFile;
-  comments: Array<{ path: string | null; line: number | null; side: string | null; body: string; kind: string; severity: string | null }>;
+  comments: CommentRow[];
+  org: string; repo: string; number: number;
 }) {
   const fileComments = comments.filter((c) => c.path === file.newPath || c.path === file.oldPath);
   return (
@@ -161,7 +163,7 @@ function DiffFileCard({ file, comments }: {
           <table className="w-full text-[12.5px] mono" style={{ borderCollapse: "collapse" }}>
             <tbody>
               {file.hunks.map((h, hi) => (
-                <HunkBlock key={hi} hunk={h} fileComments={fileComments} />
+                <HunkBlock key={hi} hunk={h} fileComments={fileComments} org={org} repo={repo} number={number} filePath={file.newPath ?? file.oldPath ?? ""} />
               ))}
             </tbody>
           </table>
@@ -171,9 +173,10 @@ function DiffFileCard({ file, comments }: {
   );
 }
 
-function HunkBlock({ hunk, fileComments }: {
+function HunkBlock({ hunk, fileComments, org, repo, number, filePath }: {
   hunk: import("@forge/shared").DiffHunk;
-  fileComments: Array<{ path: string | null; line: number | null; side: string | null; body: string; kind: string; severity: string | null }>;
+  fileComments: Array<CommentRow>;
+  org: string; repo: string; number: number; filePath: string;
 }) {
   return (
     <>
@@ -193,19 +196,34 @@ function HunkBlock({ hunk, fileComments }: {
           <tr key={li} style={{ background: bg }}>
             <td className="pl-4 pr-2 text-[var(--text-faint)] select-none w-10 text-right align-top">{l.oldLine ?? ""}</td>
             <td className="px-1 text-[var(--text-faint)] select-none w-10 text-right align-top border-r">{l.newLine ?? ""}</td>
-            <td className="pl-3 pr-4 whitespace-pre-wrap break-all" style={{ width: "99%" }}>
+            <td className="pl-3 pr-4 whitespace-pre-wrap break-all align-top" style={{ width: "99%" }}>
               <span className={l.type === "add" ? "text-[var(--green)]" : l.type === "remove" ? "text-[var(--red)]" : ""}>{marker} </span>
               {l.content}
-              {lineComments.map((c, ci) => (
-                <div key={ci} className={`my-1.5 p-2.5 rounded text-[12px] mono border ${
+              {l.newLine !== null && (
+                <DiffCommentBox org={org} repo={repo} number={number} path={filePath} line={l.newLine} side="new" />
+              )}
+              {lineComments.map((c) => (
+                <div key={c.id} className={`my-1.5 p-2.5 rounded text-[12px] mono border ${
                   c.severity === "critical" ? "border-[var(--red)] bg-[color-mix(in_srgb,var(--red)_6%,transparent)]" :
                   c.severity === "warning" ? "border-[var(--yellow)] bg-[color-mix(in_srgb,var(--yellow)_6%,transparent)]" :
                   "border-[var(--border-strong)]"
                 }`}>
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text-faint)] mb-1">
-                    {c.kind === "ai_review" ? "🤖 autonomous reviewer" : "human"} {c.severity ? `· ${c.severity}` : ""}
+                    {c.kind === "ai_review" ? "🤖 autonomous reviewer" : "human"}
+                    {c.authorHandle ? ` · ${c.authorHandle}` : ""} {c.severity ? `· ${c.severity}` : ""}
                   </div>
                   <Markdown text={c.body} className="text-[13px] leading-relaxed" />
+                  <div className="mt-1.5">
+                    {repliesFor(fileComments, c.id).map((rc) => (
+                      <div key={rc.id} className="mt-1.5 pl-3 border-l-2 border-[var(--border-strong)]">
+                        <div className="text-[10px] uppercase tracking-wide text-[var(--text-faint)] mb-0.5">
+                          {rc.authorHandle ?? "human"} replied
+                        </div>
+                        <Markdown text={rc.body} className="text-[12.5px] leading-relaxed" />
+                      </div>
+                    ))}
+                    <DiffCommentBox org={org} repo={repo} number={number} inReplyTo={c.id} />
+                  </div>
                 </div>
               ))}
             </td>
@@ -217,4 +235,20 @@ function HunkBlock({ hunk, fileComments }: {
       </tr>
     </>
   );
+}
+
+interface CommentRow {
+  id: number;
+  path: string | null;
+  line: number | null;
+  side: string | null;
+  body: string;
+  kind: string;
+  severity: string | null;
+  inReplyTo: number | null;
+  authorHandle: string | null;
+}
+
+function repliesFor(comments: CommentRow[], parentId: number): CommentRow[] {
+  return comments.filter((c) => c.inReplyTo === parentId);
 }
