@@ -55,32 +55,28 @@ async function syncBranch(
   orgSlug: string,
   repoName: string,
 ): Promise<void> {
-  // 1. upsert branch row (onConflict handles the concurrent-create race:
-  // two pushes creating the same branch both fall back to the update path).
+  // 1. Read the OLD sha BEFORE upserting — the incremental import range
+  // (old..new) depends on the pre-push value, and the upsert overwrites it.
+  const prior = (await db
+    .select({ commitSha: branches.commitSha })
+    .from(branches)
+    .where(and(eq(branches.repoId, repoId), eq(branches.name, branchName)))
+    .limit(1))[0];
+  const oldSha = prior?.commitSha ?? null;
+
+  // 2. Upsert branch row (onConflict handles the concurrent-create race:
+  // two pushes creating the same branch both land on the update path).
   const isDefault = branchName === repoDefaultBranch;
-  const inserted = await db
+  await db
     .insert(branches)
     .values({ repoId, name: branchName, commitSha: newSha, isDefault })
     .onConflictDoUpdate({
       target: [branches.repoId, branches.name],
       set: { commitSha: newSha, updatedAt: new Date() },
-    })
-    .returning({ id: branches.id });
-  // Under a lost race the update already set the new sha; fetch the row to
-  // decide the import range from the sha actually stored before this push.
-  const existing = inserted.length > 0
-    ? []
-    : await db
-        .select()
-        .from(branches)
-        .where(and(eq(branches.repoId, repoId), eq(branches.name, branchName)))
-        .limit(1);
+    });
 
-  // 2. import new commits (old..new); if branch is new, import last 500
-  let range: string | null = null;
-  if (existing.length > 0 && existing[0]!.commitSha && existing[0]!.commitSha !== "0".repeat(40)) {
-    range = `${existing[0]!.commitSha}..${newSha}`;
-  }
+  // 3. Import new commits (old..new); if branch is new, import last 500.
+  const range = oldSha && oldSha !== "0".repeat(40) ? `${oldSha}..${newSha}` : null;
 
   const newCommits = range
     ? await revListCommits(gitDir, range, 500)
@@ -134,7 +130,9 @@ async function syncBranch(
         await db.update(pullRequests).set({ headSha: newSha, updatedAt: new Date() }).where(eq(pullRequests.id, prId));
       } else {
         const baseSha = await revParse(gitDir, repoDefaultBranch);
-        // Retry on unique-number conflicts from concurrent pushes.
+        // Retry on unique-number conflicts from concurrent pushes. A conflict
+        // on the open-head-branch partial index means a concurrent push already
+        // opened the PR for this branch — adopt that PR instead of failing.
         let pr: { id: number; number: number } | undefined;
         for (let attempt = 0; attempt < 3 && !pr; attempt++) {
           const [{ max }] = await db
@@ -158,6 +156,21 @@ async function syncBranch(
               })
               .returning({ id: pullRequests.id, number: pullRequests.number });
           } catch (err) {
+            const existingPr = (await db
+              .select({ id: pullRequests.id, number: pullRequests.number })
+              .from(pullRequests)
+              .where(and(
+                eq(pullRequests.repoId, repoId),
+                eq(pullRequests.headBranch, branchName),
+                eq(pullRequests.status, "open"),
+              ))
+              .limit(1))[0];
+            if (existingPr) {
+              // Concurrent creator won the race; sync it and reuse it.
+              await db.update(pullRequests).set({ headSha: newSha, updatedAt: new Date() }).where(eq(pullRequests.id, existingPr.id));
+              pr = existingPr;
+              break;
+            }
             if (attempt === 2) throw err;
             await new Promise((r) => setTimeout(r, 50 + Math.random() * 100));
           }
@@ -166,7 +179,7 @@ async function syncBranch(
         prId = pr.id;
         prNumber = pr.number;
         await db.update(intents).set({ linkedPrId: prId, status: "in_review" }).where(eq(intents.id, it.id));
-        await db.insert(intentLinks).values({ intentId: it.id, kind: "pr", value: String(prNumber) });
+        await db.insert(intentLinks).values({ intentId: it.id, kind: "pr", value: String(prNumber) }).onConflictDoNothing();
         await db.insert(activities).values({
           repoId,
           userId: it.authorId,

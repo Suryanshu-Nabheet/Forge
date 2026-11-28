@@ -11,9 +11,9 @@
 import { NextResponse } from "next/server";
 import {
   loginUser, createSession, loginBlocked, recordLoginFailure, clearLoginFailures,
-  recordAudit, verifyTotp, decryptSecret, consumeRecoveryCode,
+  recordAudit, verifyTotpAt, decryptSecret, consumeRecoveryCode,
 } from "@forge/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, users } from "@forge/db";
 
 function clientIp(req: Request): string | null {
@@ -24,8 +24,8 @@ function clientIp(req: Request): string | null {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as { email?: string; password?: string; code?: string; recoveryCode?: string };
-  const email = (body.email ?? "").trim();
+  const body = (await req.json().catch(() => ({}))) as { email?: string; password?: string; code?: string; recoveryCode?: string };
+  const email = (body.email ?? "").trim().toLowerCase(); // register lowercases; match it
   const ip = "login"; // single bucket; see note above
 
   if (loginBlocked(email, ip)) {
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "invalid credentials" }, { status: 401 });
     }
     const row = (await db
-      .select({ totpSecret: users.totpSecret, recoveryCodes: users.recoveryCodes })
+      .select({ totpSecret: users.totpSecret, recoveryCodes: users.recoveryCodes, totpLastCounter: users.totpLastCounter })
       .from(users)
       .where(eq(users.id, user.id))
       .limit(1))[0];
@@ -54,28 +54,44 @@ export async function POST(req: Request) {
     }
 
     if (body.code) {
-      let ok = false;
+      let counter: number | null = null;
       try {
-        ok = verifyTotp(decryptSecret(row.totpSecret), body.code.trim());
+        counter = verifyTotpAt(decryptSecret(row.totpSecret), String(body.code).trim());
       } catch {
-        ok = false; // decryption failure → treat as invalid code
+        counter = null; // decryption failure → treat as invalid code
       }
-      if (!ok) {
+      // Replay guard (RFC 6238 §5.2): reject counters at/below the last
+      // accepted one, and record the accepted counter atomically enough
+      // for the single-process model.
+      const last = row.totpLastCounter ?? null;
+      if (counter === null || (last !== null && counter <= last)) {
         recordLoginFailure(email, ip);
         void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.totp_failed", targetType: "account", targetId: user.handle, ip: clientIp(req) });
         return NextResponse.json({ error: "invalid code" }, { status: 401 });
       }
+      await db.update(users).set({ totpLastCounter: counter }).where(eq(users.id, user.id));
     } else if (body.recoveryCode) {
       if (!row.recoveryCodes) {
         return NextResponse.json({ error: "no recovery codes available" }, { status: 400 });
       }
-      const remaining = consumeRecoveryCode(row.recoveryCodes, body.recoveryCode);
+      const remaining = consumeRecoveryCode(row.recoveryCodes, String(body.recoveryCode));
       if (remaining === null) {
         recordLoginFailure(email, ip);
         void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.recovery_failed", targetType: "account", targetId: user.handle, ip: clientIp(req) });
         return NextResponse.json({ error: "invalid recovery code" }, { status: 401 });
       }
-      await db.update(users).set({ recoveryCodes: remaining === "" ? null : remaining }).where(eq(users.id, user.id));
+      // Conditional update guards the single-use guarantee against a
+      // read-modify-write race: only succeeds if the list is unchanged.
+      const consumed = await db
+        .update(users)
+        .set({ recoveryCodes: remaining === "" ? null : remaining })
+        .where(and(eq(users.id, user.id), eq(users.recoveryCodes, row.recoveryCodes)))
+        .returning({ id: users.id });
+      if (consumed.length === 0) {
+        // A concurrent login consumed a code from the same list first.
+        recordLoginFailure(email, ip);
+        return NextResponse.json({ error: "invalid recovery code" }, { status: 401 });
+      }
       void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.recovery_used", targetType: "account", targetId: user.handle, ip: clientIp(req) });
     }
 

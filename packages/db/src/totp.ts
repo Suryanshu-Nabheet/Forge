@@ -65,15 +65,27 @@ export function totpCode(secretB32: string, atTimeSeconds = Math.floor(Date.now(
   return code.toString().padStart(TOTP_DIGITS, "0");
 }
 
-/** Verify a code against the secret with ±1 period of clock skew allowed. */
-export function verifyTotp(secretB32: string, code: string, window = 1): boolean {
-  if (!/^\d{6}$/.test(code)) return false;
+/**
+ * Verify a code against the secret with ±1 period of clock skew allowed.
+ * Returns the matching time-step counter (for replay protection), or null.
+ * RFC 6238 §5.2: reject counters at or below the last accepted one.
+ */
+export function verifyTotpAt(secretB32: string, code: string, window = 1): number | null {
+  if (!/^\d{6}$/.test(code)) return null;
   const now = Math.floor(Date.now() / 1000);
   for (let drift = -window; drift <= window; drift++) {
-    const candidate = totpCode(secretB32, now + drift * TOTP_PERIOD);
-    if (timingSafeEqual(Buffer.from(candidate), Buffer.from(code))) return true;
+    const atTime = now + drift * TOTP_PERIOD;
+    const candidate = totpCode(secretB32, atTime);
+    if (timingSafeEqual(Buffer.from(candidate), Buffer.from(code))) {
+      return Math.floor(atTime / TOTP_PERIOD);
+    }
   }
-  return false;
+  return null;
+}
+
+/** Boolean convenience wrapper (no replay tracking). */
+export function verifyTotp(secretB32: string, code: string, window = 1): boolean {
+  return verifyTotpAt(secretB32, code, window) !== null;
 }
 
 /** Generate a fresh base32 TOTP secret (160 bits). */
@@ -83,10 +95,16 @@ export function generateTotpSecret(): string {
 
 // ---------- secret encryption at rest ----------
 
+let cachedKey: Buffer | null = null;
+
 function encryptionKey(): Buffer {
+  if (cachedKey) return cachedKey;
   const secret = process.env.FORGE_SECRET ?? process.env.FORGE_HOOK_TOKEN;
   if (!secret) throw new Error("FORGE_SECRET (or FORGE_HOOK_TOKEN) must be set to encrypt TOTP secrets");
-  return scryptSync(secret, "forge-totp-v1", 32);
+  // Derive once per process: scrypt is synchronous and would otherwise
+  // stall the event loop on every encrypt/decrypt. Env can't change mid-run.
+  cachedKey = scryptSync(secret, "forge-totp-v1", 32);
+  return cachedKey;
 }
 
 export function encryptSecret(plain: string): string {

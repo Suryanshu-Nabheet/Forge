@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "totp_last_counter" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "pr_open_head_branch_idx" ON "pull_requests" USING btree ("repo_id","head_branch") WHERE "pull_requests"."status" = 'open';

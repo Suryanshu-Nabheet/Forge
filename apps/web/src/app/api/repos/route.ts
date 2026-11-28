@@ -25,6 +25,7 @@ export async function POST(req: Request) {
   // winner's org — the caller may NOT have created it.
   const existingOrg = (await db.select().from(organizations).where(eq(organizations.slug, orgSlug)).limit(1))[0];
   let orgId: number;
+  let orgCreated = false;
   if (existingOrg) {
     const role = await roleInOrg(existingOrg.id, user.id);
     if (role === "none") {
@@ -39,8 +40,13 @@ export async function POST(req: Request) {
         name: orgSlug,
         ownerId: user.id,
       }).returning({ id: organizations.id });
-    } catch {
+      if (org) orgCreated = true;
+    } catch (err) {
       // Lost a concurrent create race — the winner made the same org.
+      // Only unique violations mean that; anything else is a real error.
+      if (!(err instanceof Error) || !/unique/i.test(String((err as { code?: string }).code ?? err.message))) {
+        throw err;
+      }
       org = (await db.select({ id: organizations.id }).from(organizations)
         .where(eq(organizations.slug, orgSlug)).limit(1))[0];
       if (!org) throw new Error("org creation failed");
@@ -57,26 +63,34 @@ export async function POST(req: Request) {
     await db.insert(orgMembers).values({ orgId, userId: user.id, role: "owner" }).onConflictDoNothing();
   }
 
-  const dupe = await db.select({ id: repositories.id }).from(repositories)
-    .where(and(eq(repositories.orgId, orgId), eq(repositories.name, name))).limit(1);
-  if (dupe.length > 0) return NextResponse.json({ error: "repo already exists" }, { status: 409 });
-
   const protectedBranches = ["main"];
-  const [repo] = await db.insert(repositories).values({
-    orgId,
-    name,
-    description: body.description || null,
-    visibility: body.visibility === "private" ? "private" : "public",
-    protectedBranches,
-  }).returning({ id: repositories.id });
+  let repo: { id: number } | undefined;
+  try {
+    [repo] = await db.insert(repositories).values({
+      orgId,
+      name,
+      description: body.description || null,
+      visibility: body.visibility === "private" ? "private" : "public",
+      protectedBranches,
+    }).returning({ id: repositories.id });
+  } catch {
+    // Lost a concurrent same-name create → clean 409, not a raw 500.
+    return NextResponse.json({ error: "repo already exists" }, { status: 409 });
+  }
 
-  // Create the bare repo; on failure roll the DB row back so we don't
-  // leave a repo that 500s on every git operation (mirrors fork cleanup).
+  // Create the bare repo; on failure roll everything back so we don't
+  // leave a repo that 500s on every git operation or an empty org.
+  const createdOrgHere = orgCreated;
   try {
     await initBareRepo(orgSlug, name);
     await setProtectedBranches(repoGitDir(orgSlug, name), protectedBranches);
   } catch (err) {
     await db.delete(repositories).where(eq(repositories.id, repo!.id));
+    if (createdOrgHere) {
+      // Best-effort cleanup of the org this request created (cascades to
+      // the membership row); ignore failures — an empty org is harmless.
+      await db.delete(organizations).where(eq(organizations.id, orgId)).catch(() => {});
+    }
     return NextResponse.json({ error: "failed to initialize repository storage" }, { status: 500 });
   }
 

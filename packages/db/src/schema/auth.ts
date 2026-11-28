@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   // rest with a key derived from FORGE_SECRET; null until enrolled.
   totpSecret: text("totp_secret"),
   totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+  totpLastCounter: integer("totp_last_counter"), // replay guard: highest accepted time-step
   recoveryCodes: text("recovery_codes"), // sha256 hashes, comma-separated
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

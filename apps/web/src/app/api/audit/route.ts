@@ -3,13 +3,30 @@
 // (Org- or platform-level scoping can be layered on without a schema change.)
 
 import { NextResponse } from "next/server";
-import { recentAudit } from "@forge/db";
+import { db, auditLog, recentAudit } from "@forge/db";
+import { eq, desc } from "drizzle-orm";
 import { requireUser, unauthorized } from "@/server/session";
 
 export async function GET() {
   const user = await requireUser();
   if (!user) return unauthorized();
-  const rows = await recentAudit(200);
-  const scoped = rows.filter((r) => r.actorId === user.id);
-  return NextResponse.json({ audit: scoped });
+  // Scope in SQL (the global recency limit would otherwise hide older
+  // events); call sites that want platform-wide use recentAudit directly.
+  const rows = await db
+    .select({
+      id: auditLog.id,
+      actorId: auditLog.actorId,
+      actorHandle: auditLog.actorHandle,
+      action: auditLog.action,
+      targetType: auditLog.targetType,
+      targetId: auditLog.targetId,
+      ip: auditLog.ip,
+      data: auditLog.data,
+      createdAt: auditLog.createdAt,
+    })
+    .from(auditLog)
+    .where(eq(auditLog.actorId, user.id))
+    .orderBy(desc(auditLog.id))
+    .limit(200);
+  return NextResponse.json({ audit: rows });
 }

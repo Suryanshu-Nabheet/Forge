@@ -1,5 +1,6 @@
 // Collaboration tables: pull requests, review comments, intents, intent links.
 
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   serial,
@@ -49,6 +50,9 @@ export const pullRequests = pgTable(
   (t) => [
     uniqueIndex("pr_repo_number_idx").on(t.repoId, t.number),
     index("pr_repo_status_idx").on(t.repoId, t.status),
+    // At most one OPEN PR per head branch — concurrent pushes of an intent
+    // branch must not create duplicates.
+    uniqueIndex("pr_open_head_branch_idx").on(t.repoId, t.headBranch).where(sql`${t.status} = 'open'`),
   ],
 );
 
