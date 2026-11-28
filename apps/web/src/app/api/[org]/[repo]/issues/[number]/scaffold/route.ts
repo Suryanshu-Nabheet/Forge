@@ -83,6 +83,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ org: s
     await db.insert(intentLinks).values({ intentId: intent.id, kind: "branch", value: branchName });
     await db.insert(activities).values({
       repoId: r.repoId,
+      userId: user.id,
       type: "intent_scaffolded",
       data: { branch: branchName, number: num },
     });

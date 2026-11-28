@@ -47,6 +47,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
 
   await db.insert(activities).values({
     repoId: r.repoId,
+    userId: user.id,
     type: "intent_created",
     data: { title, number: intent.number },
   });

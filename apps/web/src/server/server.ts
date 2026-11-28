@@ -199,7 +199,7 @@ async function authorizeSse(req: import("node:http").IncomingMessage, pathname: 
   if (scoped) {
     const [, orgSlug, repoName, numStr] = scoped;
     const rows = await db
-      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .select({ orgId: repositories.orgId, ownerId: organizations.ownerId, visibility: repositories.visibility })
       .from(pullRequests)
       .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
       .innerJoin(organizations, eq(organizations.id, repositories.orgId))
@@ -215,9 +215,10 @@ async function authorizeSse(req: import("node:http").IncomingMessage, pathname: 
   const legacyPr = /^pr-(\d+)$/.exec(rest);
   if (legacyPr) {
     const rows = await db
-      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .select({ orgId: repositories.orgId, ownerId: organizations.ownerId, visibility: repositories.visibility })
       .from(pullRequests)
       .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
+      .innerJoin(organizations, eq(organizations.id, repositories.orgId))
       .where(eq(pullRequests.id, Number(legacyPr[1])))
       .limit(1);
     return await authorizeSseRepo(rows[0], user.id, db, orgMembers, and, eq);
@@ -226,9 +227,10 @@ async function authorizeSse(req: import("node:http").IncomingMessage, pathname: 
   const jobMatch = /^job-(\d+)$/.exec(rest);
   if (jobMatch) {
     const rows = await db
-      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .select({ orgId: repositories.orgId, ownerId: organizations.ownerId, visibility: repositories.visibility })
       .from(jobRuns)
       .innerJoin(repositories, eq(repositories.id, jobRuns.repoId))
+      .innerJoin(organizations, eq(organizations.id, repositories.orgId))
       .where(eq(jobRuns.id, Number(jobMatch[1])))
       .limit(1);
     return await authorizeSseRepo(rows[0], user.id, db, orgMembers, and, eq);
@@ -243,7 +245,7 @@ async function authorizeSse(req: import("node:http").IncomingMessage, pathname: 
 }
 
 async function authorizeSseRepo(
-  repo: { orgId: number; visibility: string } | undefined,
+  repo: { orgId: number; ownerId: number; visibility: string } | undefined,
   userId: number,
   db: typeof import("@forge/db").db,
   orgMembers: typeof import("@forge/db").orgMembers,
@@ -252,6 +254,8 @@ async function authorizeSseRepo(
 ): Promise<boolean> {
   if (!repo) return false;
   if (repo.visibility === "public") return true;
+  // Same predicate as roleInOrg: org owner or org_members row.
+  if (repo.ownerId === userId) return true;
   const member = await db
     .select({ id: orgMembers.id })
     .from(orgMembers)

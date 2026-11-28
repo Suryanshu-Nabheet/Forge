@@ -158,14 +158,21 @@ export function startSshServer(): void {
             .where(eq(sshKeys.id, match.keyId))
             .limit(1))[0];
           const stored = keyRow ? parseStoredKey(keyRow.publicKey) : null;
-          if (!stored || !ctx.blob || !stored.verify(ctx.blob, ctx.signature)) {
+          let verified = false;
+          try {
+            verified = Boolean(stored && ctx.blob && stored.verify(ctx.blob, ctx.signature));
+          } catch (err) {
+            console.error("[ssh] signature verify threw:", err);
+            verified = false;
+          }
+          if (!verified) {
             ctx.reject(["publickey"]);
             return;
           }
+          // Only a VERIFIED signature grants the session user. Unsigned
+          // probes get PK-OK and never populate `user`.
+          user = match;
         }
-        // Probe (no signature) or verified signature — accept; git always
-        // completes the signed phase before running commands.
-        user = match;
         ctx.accept();
       })();
     });

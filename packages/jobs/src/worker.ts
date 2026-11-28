@@ -151,10 +151,15 @@ async function claimJobs(): Promise<ClaimedJob[]> {
 
 async function runJob(job: Job): Promise<void> {
   const { id, queue, payload, attempts, maxAttempts } = job;
-  // job_run row for observability
+  // job_run row for observability. repoId/prId come from the payload so
+  // the run can be scoped for SSE authz and per-PR log lookups.
+  const repoId = typeof payload.repoId === "number" ? payload.repoId : null;
+  const prId = typeof payload.prId === "number" ? payload.prId : null;
   const [run] = await db.insert(jobRuns).values({
     jobQueueId: id,
     type: queue as never,
+    repoId,
+    prId,
     payload,
     status: "running",
   }).returning({ id: jobRuns.id });
@@ -208,8 +213,8 @@ async function dispatch(queue: string, payload: Record<string, unknown>, runId: 
 
 /**
  * Log a job event. `prRef` identifies the PR for SSE fanout: the browser
- * subscribes with the repo-scoped display number channel
- * (`pr-<org>/<repo>/<number>`), never the DB id.
+ * subscribes with the repo-scoped channel `<org>/<repo>/pr-<number>`
+ * (matching authorizeSse), never the DB id.
  */
 async function logEvent(
   runId: number,
@@ -219,7 +224,7 @@ async function logEvent(
 ): Promise<void> {
   await db.insert(jobEvents).values({ jobRunId: runId, level, message });
   ssePublish(`job-${runId}`, "log", { level, message });
-  if (prRef) ssePublish(`pr-${prRef.org}/${prRef.repo}/${prRef.number}`, "log", { level, message });
+  if (prRef) ssePublish(`${prRef.org}/${prRef.repo}/pr-${prRef.number}`, "log", { level, message });
   ssePublish(`pr-activity`, "tick", { runId, prId: prRef?.id ?? null });
 }
 

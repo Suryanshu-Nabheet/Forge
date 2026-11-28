@@ -20,7 +20,9 @@ export async function POST(req: Request) {
   if (!SLUG_RE.test(orgSlug)) return NextResponse.json({ error: "invalid org slug" }, { status: 400 });
   if (!SLUG_RE.test(name)) return NextResponse.json({ error: "invalid repo name" }, { status: 400 });
 
-  // Org: reuse if the caller is a member/owner; otherwise create with caller as owner.
+  // Org: reuse if the caller is a member/owner; otherwise create with caller
+  // as owner. On a concurrent-create conflict, re-check membership on the
+  // winner's org — the caller may NOT have created it.
   const existingOrg = (await db.select().from(organizations).where(eq(organizations.slug, orgSlug)).limit(1))[0];
   let orgId: number;
   if (existingOrg) {
@@ -44,6 +46,14 @@ export async function POST(req: Request) {
       if (!org) throw new Error("org creation failed");
     }
     orgId = org!.id;
+    // Re-check on the resolved org: if we lost the race, the winner's org
+    // may not include us — the same membership gate as the existingOrg path.
+    const role = await roleInOrg(orgId, user.id);
+    if (role === "none") {
+      return NextResponse.json({ error: "you are not a member of this organization" }, { status: 403 });
+    }
+    // The caller owns or is a member of the resolved org; ensure the
+    // membership row exists (owner gets it here, pre-existing member keeps theirs).
     await db.insert(orgMembers).values({ orgId, userId: user.id, role: "owner" }).onConflictDoNothing();
   }
 

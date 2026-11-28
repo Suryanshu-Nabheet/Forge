@@ -12,10 +12,12 @@ export async function POST(req: Request) {
   const q = (body.q ?? "").trim();
   if (!q) return NextResponse.json({ results: [] });
 
-  // Visible repos: public always; private only orgs the user belongs to.
+  // Visible repos: public always; private only orgs the user owns or
+  // belongs to (same predicate as roleInOrg).
   const visFilter = user
     ? or(
         eq(repositories.visibility, "public"),
+        eq(organizations.ownerId, user.id),
         inArray(
           repositories.orgId,
           db.select({ orgId: orgMembers.orgId }).from(orgMembers).where(eq(orgMembers.userId, user.id)),

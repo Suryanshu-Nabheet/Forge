@@ -27,7 +27,7 @@ export function OrgMembers({ org, you }: { org: string; you: string }) {
     }
     setLoaded(true);
   }
-  if (!loaded) void load(), setLoaded(true);
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function add() {
     setBusy(true); setError(null);

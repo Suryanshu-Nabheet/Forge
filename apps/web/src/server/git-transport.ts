@@ -37,7 +37,9 @@ const REPO_URL_RE = /^([a-z0-9][a-z0-9-]{0,38})\/([a-z0-9][a-z0-9_.-]{0,99})\.gi
 
 // Only these suffixes may follow /git/<org>/<repo>.git in a smart-HTTP URL.
 // Anything else is rejected before it can reach git http-backend's PATH_INFO.
-const GIT_REST_RE = /^\/(info\/refs|HEAD|objects\/info\/alternates|objects\/info\/http-alternates|objects\/info\/packs|git-upload-pack|git-receive-pack)$/;
+// Covers smart-HTTP endpoints plus the dumb-HTTP fallback paths (loose
+// objects, packfiles) so degraded clients still work.
+const GIT_REST_RE = /^\/(info\/refs|HEAD|git-upload-pack|git-receive-pack|objects\/info\/alternates|objects\/info\/http-alternates|objects\/info\/packs|objects\/pack\/[0-9a-f]{40}\.(pack|idx)|objects\/[0-9a-f]{2}\/[0-9a-f]{38})$/;
 
 export interface GitAuthResult {
   userId: number | null;

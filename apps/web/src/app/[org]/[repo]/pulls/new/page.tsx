@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 
 interface BranchInfo {
@@ -8,7 +8,16 @@ interface BranchInfo {
   defaultBranch: string;
 }
 
+// useSearchParams() requires a Suspense boundary for prerendering (Next 15).
 export default function NewPullPage() {
+  return (
+    <Suspense fallback={<div className="max-w-xl text-[13px] text-[var(--text-dim)]">Loading…</div>}>
+      <NewPullForm />
+    </Suspense>
+  );
+}
+
+function NewPullForm() {
   const router = useRouter();
   const { org: orgSlug, repo: repoName } = useParams<{ org: string; repo: string }>();
   const searchParams = useSearchParams();

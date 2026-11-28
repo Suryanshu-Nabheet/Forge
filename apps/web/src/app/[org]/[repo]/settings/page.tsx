@@ -28,7 +28,7 @@ export default function RepoSettingsPage() {
     }
     setLoaded(true);
   }
-  if (!loaded) void load(), setLoaded(true);
+  useEffect(() => { void load(); }, [orgSlug, repoName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     setBusy(true); setError(null);
