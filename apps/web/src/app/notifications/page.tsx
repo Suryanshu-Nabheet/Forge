@@ -29,6 +29,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [needsReview, setNeedsReview] = useState<Array<{ repo: string; number: number; title: string; source: string }>>([]);
   const [unread, setUnread] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [marking, setMarking] = useState(false);
@@ -38,8 +39,13 @@ export default function NotificationsPage() {
       try {
         const res = await fetch("/api/notifications");
         if (res.ok) {
-          const data = (await res.json()) as { notifications: Notification[]; unread: number };
+          const data = (await res.json()) as {
+            notifications: Notification[];
+            unread: number;
+            needsReview?: Array<{ repo: string; number: number; title: string; source: string }>;
+          };
           setNotifications(data.notifications);
+          setNeedsReview(data.needsReview ?? []);
           setUnread(data.unread);
         }
       } catch { /* leave empty state */ }
@@ -81,6 +87,27 @@ export default function NotificationsPage() {
           )}
         </div>
       </div>
+      {needsReview.length > 0 && (
+        <div className="card divide-y mb-4">
+          <div className="px-4 py-2 text-[11px] uppercase tracking-wide text-[var(--text-faint)]">
+            needs your review ({needsReview.length})
+          </div>
+          {needsReview.map((q) => (
+            <a key={`${q.repo}-${q.number}`} href={`/${q.repo}/pulls/${q.number}`}
+              className="block px-4 py-2.5 hover:bg-[var(--bg-hover)]">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[13px] font-medium">{q.title}</span>
+                <span className="text-xs text-[var(--text-faint)]">#{q.number}</span>
+                {q.source === "codeowners" && (
+                  <span className="text-[10px] text-[var(--text-faint)]" title="assigned via CODEOWNERS">⚙</span>
+                )}
+                <span className="flex-1" />
+                <span className="mono text-xs text-[var(--text-faint)]">{q.repo}</span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
       <div className="card divide-y">
         {!loaded && <div className="px-4 py-8 text-center text-[13px] text-[var(--text-dim)]">loading…</div>}
         {loaded && notifications.length === 0 && (

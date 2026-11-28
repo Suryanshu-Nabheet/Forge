@@ -981,3 +981,25 @@ describe("CODEOWNERS review auto-assignment", () => {
     expect(selfReq.status).toBe(400);
   });
 });
+
+describe("reviewer inbox queue", () => {
+  it("surfaces pending review requests as 'needs your review'", async () => {
+    // Sam (the CODEOWNERS-assigned reviewer) checks their inbox.
+    const samLogin = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "sam@corp.dev", password: "longpassword1" }),
+    });
+    const samCookie = (samLogin.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const inbox = await fetch(`${BASE}/api/notifications`, { headers: { cookie: samCookie } });
+    const body = (await inbox.json()) as {
+      needsReview: Array<{ repo: string; number: number; source: string }>;
+      unread: number;
+    };
+    expect(inbox.ok).toBe(true);
+    const queueEntry = body.needsReview.find((q) => q.repo === "corp/grep-repo");
+    expect(queueEntry).toBeDefined();
+    expect(queueEntry!.source).toBe("codeowners");
+    expect(body.unread).toBeGreaterThan(0);
+  });
+});
