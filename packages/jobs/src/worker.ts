@@ -7,12 +7,15 @@ import { db } from "@forge/db";
 import { jobQueue, jobRuns, jobEvents, pullRequests, reviewComments, repositories, embeddings, previews, organizations, intents } from "@forge/db";
 import { repoGitDir } from "@forge/git";
 import { analyzeDiffForReview, answerQuestion, generatePlan, embedChunks } from "@forge/ai";
-import { diffCommits, revParse, catFileText, lsTree, defaultBranch } from "@forge/git";
+import { diffCommits, revParse, catFileText, lsTree } from "@forge/git";
 import type { DiffFile, CodeChunk } from "@forge/shared";
 
 const WORKER_ID = `worker-${process.pid}`;
 const POLL_MS = 500;
 const CLAIM_LIMIT = 5;
+// Cap in-flight jobs so a burst of pushes cannot fork-bomb the process.
+const MAX_CONCURRENT_JOBS = 8;
+let inFlight = 0;
 
 let running = false;
 
@@ -59,6 +62,10 @@ async function pollLoop(): Promise<void> {
 async function janitor(): Promise<void> {
   await db.execute(sql`DELETE FROM sessions WHERE expires_at < now()`);
   await db.execute(sql`
+    DELETE FROM personal_access_tokens
+    WHERE revoked_at < now() - interval '30 days'
+  `);
+  await db.execute(sql`
     DELETE FROM job_queue
     WHERE status IN ('done','failed')
       AND updated_at < now() - interval '1 day'
@@ -97,7 +104,10 @@ async function claimJobs(): Promise<ClaimedJob[]> {
       AND locked_by <> ${WORKER_ID}
   `);
 
-  // Atomic claim: FOR UPDATE SKIP LOCKED via a single UPDATE ... RETURNING
+  // Atomic claim: FOR UPDATE SKIP LOCKED via a single UPDATE ... RETURNING.
+  // Claim only what the concurrency budget allows.
+  const budget = Math.max(0, MAX_CONCURRENT_JOBS - inFlight);
+  if (budget === 0) return [];
   const claimed = await db.execute(sql`
     UPDATE job_queue SET status = 'active', locked_at = now(), locked_by = ${WORKER_ID}, attempts = attempts + 1, updated_at = now()
     WHERE id IN (
@@ -105,15 +115,20 @@ async function claimJobs(): Promise<ClaimedJob[]> {
       WHERE status = 'queued' AND run_at <= now()
       ORDER BY id
       FOR UPDATE SKIP LOCKED
-      LIMIT ${CLAIM_LIMIT}
+      LIMIT ${Math.min(CLAIM_LIMIT, budget)}
     )
     RETURNING id, queue, payload, attempts, max_attempts
   `);
   const rows = (claimed.rows ?? []) as unknown as ClaimedJob[];
   for (const job of rows) {
-    void runJob(job).catch((err) => {
-      console.error(`[worker] job ${job.id} crashed:`, err);
-    });
+    inFlight++;
+    void runJob(job)
+      .catch((err) => {
+        console.error(`[worker] job ${job.id} crashed:`, err);
+      })
+      .finally(() => {
+        inFlight--;
+      });
   }
   return rows;
 }
@@ -175,11 +190,21 @@ async function dispatch(queue: string, payload: Record<string, unknown>, runId: 
   }
 }
 
-async function logEvent(runId: number, level: "info" | "warn" | "error", message: string, prId?: number): Promise<void> {
+/**
+ * Log a job event. `prRef` identifies the PR for SSE fanout: the browser
+ * subscribes with the repo-scoped display number channel
+ * (`pr-<org>/<repo>/<number>`), never the DB id.
+ */
+async function logEvent(
+  runId: number,
+  level: "info" | "warn" | "error",
+  message: string,
+  prRef?: { id: number; number: number; org: string; repo: string },
+): Promise<void> {
   await db.insert(jobEvents).values({ jobRunId: runId, level, message });
   ssePublish(`job-${runId}`, "log", { level, message });
-  if (prId) ssePublish(`pr-${prId}`, "log", { level, message });
-  ssePublish(`pr-activity`, "tick", { runId, prId: prId ?? null });
+  if (prRef) ssePublish(`pr-${prRef.org}/${prRef.repo}/${prRef.number}`, "log", { level, message });
+  ssePublish(`pr-activity`, "tick", { runId, prId: prRef?.id ?? null });
 }
 
 // ---------- job implementations ----------
@@ -213,14 +238,14 @@ async function runPrReviewInner(payload: { repoId: number; prId: number }, runId
   if (!repo) throw new Error(`repo ${pr.repoId} not found`);
   const gitDir = repoGitDir(repo.slug, repo.name);
 
-  await logEvent(runId, "info", `Reviewing PR #${pr.number}: ${pr.title}`, pr.id);
+  await logEvent(runId, "info", `Reviewing PR #${pr.number}: ${pr.title}`, { id: pr.id, number: pr.number, org: repo.slug, repo: repo.name });
   const baseSha = pr.baseSha ?? (await revParse(gitDir, pr.baseBranch));
   const headSha = pr.headSha;
   if (!baseSha || !headSha) throw new Error("cannot resolve base/head shas");
   const diff: DiffFile[] = await diffCommits(gitDir, baseSha, headSha);
 
   const analysis = await analyzeDiffForReview(diff);
-  await logEvent(runId, "info", `Analysis complete: ${analysis.findings.length} findings, risk ${analysis.riskScore}/100 (${analysis.mode} mode)`, pr.id);
+  await logEvent(runId, "info", `Analysis complete: ${analysis.findings.length} findings, risk ${analysis.riskScore}/100 (${analysis.mode} mode)`, { id: pr.id, number: pr.number, org: repo.slug, repo: repo.name });
 
   // Remove previous AI review comments, post fresh ones (inside the per-PR lock).
   await db.delete(reviewComments).where(and(eq(reviewComments.prId, pr.id), eq(reviewComments.kind, "ai_review")));
@@ -410,6 +435,14 @@ async function runPreviewBuild(payload: { repoId: number; prId: number; commitSh
     .limit(1);
   const repo = repoRows[0];
   if (!repo) throw new Error(`repo ${payload.repoId} not found`);
+  const prRows = await db
+    .select({ id: pullRequests.id, number: pullRequests.number })
+    .from(pullRequests)
+    .where(eq(pullRequests.id, payload.prId))
+    .limit(1);
+  const prBase = prRows[0];
+  if (!prBase) throw new Error(`pr ${payload.prId} not found`);
+  const prRef = { id: prBase.id, number: prBase.number, org: repo.slug, repo: repo.name };
   const gitDir = repoGitDir(repo.slug, repo.name);
   const { runSandboxBuild } = await import("@forge/sandbox");
   const [preview] = await db.insert(previews).values({
@@ -426,7 +459,7 @@ async function runPreviewBuild(payload: { repoId: number; prId: number; commitSh
     commitSha: payload.commitSha,
     previewId: preview.id,
     onLog: (line) => {
-      void logEvent(runId, "info", line, payload.prId).catch(() => {});
+      void logEvent(runId, "info", line, prRef).catch(() => {});
     },
   });
   await db.update(previews).set({

@@ -131,5 +131,8 @@ export const intentLinks = pgTable(
     value: text("value").notNull(), // sha, PR number, or branch name
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("intent_links_intent_idx").on(t.intentId)],
+  (t) => [
+    index("intent_links_intent_idx").on(t.intentId),
+    uniqueIndex("intent_links_unique_idx").on(t.intentId, t.kind, t.value),
+  ],
 );

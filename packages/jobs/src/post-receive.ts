@@ -3,7 +3,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@forge/db";
 import { organizations, repositories, branches, commits, pullRequests, intents, intentLinks, jobQueue, activities } from "@forge/db";
-import { repoGitDir, listBranches, revParse, revListCommits, commitParents, commitStats, defaultBranch } from "@forge/git";
+import { repoGitDir, revParse, revListCommits, commitParents, commitStats } from "@forge/git";
 import { dispatchWebhookEvent } from "./webhooks";
 
 interface PostReceiveBody {
@@ -55,22 +55,26 @@ async function syncBranch(
   orgSlug: string,
   repoName: string,
 ): Promise<void> {
-  // 1. upsert branch row
-  const existing = await db
-    .select()
-    .from(branches)
-    .where(and(eq(branches.repoId, repoId), eq(branches.name, branchName)))
-    .limit(1);
-
-  if (existing.length === 0) {
-    const isDefault = branchName === repoDefaultBranch;
-    await db.insert(branches).values({ repoId, name: branchName, commitSha: newSha, isDefault });
-  } else {
-    await db
-      .update(branches)
-      .set({ commitSha: newSha, updatedAt: new Date() })
-      .where(eq(branches.id, existing[0]!.id));
-  }
+  // 1. upsert branch row (onConflict handles the concurrent-create race:
+  // two pushes creating the same branch both fall back to the update path).
+  const isDefault = branchName === repoDefaultBranch;
+  const inserted = await db
+    .insert(branches)
+    .values({ repoId, name: branchName, commitSha: newSha, isDefault })
+    .onConflictDoUpdate({
+      target: [branches.repoId, branches.name],
+      set: { commitSha: newSha, updatedAt: new Date() },
+    })
+    .returning({ id: branches.id });
+  // Under a lost race the update already set the new sha; fetch the row to
+  // decide the import range from the sha actually stored before this push.
+  const existing = inserted.length > 0
+    ? []
+    : await db
+        .select()
+        .from(branches)
+        .where(and(eq(branches.repoId, repoId), eq(branches.name, branchName)))
+        .limit(1);
 
   // 2. import new commits (old..new); if branch is new, import last 500
   let range: string | null = null;
@@ -182,8 +186,11 @@ async function syncBranch(
           .catch(() => {});
       }
 
-      // link intent to the pushed commit
-      await db.insert(intentLinks).values({ intentId: it.id, kind: "commit", value: newSha });
+      // link intent to the pushed commit (idempotent across re-pushes)
+      await db
+        .insert(intentLinks)
+        .values({ intentId: it.id, kind: "commit", value: newSha })
+        .onConflictDoNothing();
 
       // 5. enqueue: AI PR review + preview build (semantic index queued below, once)
       await enqueue("pr_review", { repoId, prId });

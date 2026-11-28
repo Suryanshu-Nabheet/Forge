@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { gitSpawn } from "./engine";
+import { gitSpawn, sandboxesRoot } from "./engine";
 
 /** Extract `git archive <commit>` output to destDir via tar. */
 export async function extractArchive(gitDir: string, commitSha: string, destDir: string): Promise<void> {
@@ -25,6 +25,7 @@ export async function extractArchive(gitDir: string, commitSha: string, destDir:
 }
 
 export function sandboxDirFor(previewId: number): string {
-  const base = process.env.FORGE_STORAGE_ROOT ?? path.join(process.cwd(), "data");
-  return path.resolve(base, "sandboxes", `preview-${previewId}`);
+  // Same monorepo-aware storage-root resolution as reposRoot() — sandboxes
+  // must land beside repos regardless of the process cwd.
+  return path.join(sandboxesRoot(), `preview-${previewId}`);
 }

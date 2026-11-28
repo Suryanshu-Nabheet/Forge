@@ -159,7 +159,7 @@ export function ssePublish(channel: string, event: string, data: unknown): void 
 
 /** SSE auth: session cookie required; channel subjects verify repo read access. */
 async function authorizeSse(req: import("node:http").IncomingMessage, pathname: string): Promise<boolean> {
-  const { userFromSessionToken, db, pullRequests, jobRuns, repositories, orgMembers } = await import("@forge/db");
+  const { userFromSessionToken, db, pullRequests, jobRuns, repositories, organizations, orgMembers } = await import("@forge/db");
   const { and, eq } = await import("drizzle-orm");
 
   // Extract the session cookie from the raw header (no Next context here).
@@ -175,41 +175,74 @@ async function authorizeSse(req: import("node:http").IncomingMessage, pathname: 
   const user = await userFromSessionToken(token);
   if (!user) return false;
 
-  const channel = pathname.replace(/^\/api\/sse\//, "");
+  // Channel forms:
+  //   <org>/<repo>/pr-<number>   PR live logs (repo-scoped, by display number)
+  //   pr-<id>                    legacy PR channel (DB id) — still authorized
+  //   job-<runId>                job-run logs
+  //   pr-activity                contentless fanout ticks
+  const rest = pathname.replace(/^\/api\/sse\//, "");
 
-  // Resolve the channel subject to a repo, then apply the read policy.
-  let repo: { orgId: number; visibility: string } | undefined;
-  const prMatch = /^pr-(\d+)$/.exec(channel);
-  const jobMatch = /^job-(\d+)$/.exec(channel);
-  if (prMatch) {
+  const scoped = /^([^\/]+)\/([^/]+)\/pr-(\d+)$/.exec(rest);
+  if (scoped) {
+    const [, orgSlug, repoName, numStr] = scoped;
     const rows = await db
       .select({ orgId: repositories.orgId, visibility: repositories.visibility })
       .from(pullRequests)
       .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
-      .where(eq(pullRequests.id, Number(prMatch[1])))
+      .innerJoin(organizations, eq(organizations.id, repositories.orgId))
+      .where(and(
+        eq(organizations.slug, orgSlug!),
+        eq(repositories.name, repoName!),
+        eq(pullRequests.number, Number(numStr)),
+      ))
       .limit(1);
-    repo = rows[0];
-  } else if (jobMatch) {
+    return await authorizeSseRepo(rows[0], user.id, db, orgMembers, and, eq);
+  }
+
+  const legacyPr = /^pr-(\d+)$/.exec(rest);
+  if (legacyPr) {
+    const rows = await db
+      .select({ orgId: repositories.orgId, visibility: repositories.visibility })
+      .from(pullRequests)
+      .innerJoin(repositories, eq(repositories.id, pullRequests.repoId))
+      .where(eq(pullRequests.id, Number(legacyPr[1])))
+      .limit(1);
+    return await authorizeSseRepo(rows[0], user.id, db, orgMembers, and, eq);
+  }
+
+  const jobMatch = /^job-(\d+)$/.exec(rest);
+  if (jobMatch) {
     const rows = await db
       .select({ orgId: repositories.orgId, visibility: repositories.visibility })
       .from(jobRuns)
       .innerJoin(repositories, eq(repositories.id, jobRuns.repoId))
       .where(eq(jobRuns.id, Number(jobMatch[1])))
       .limit(1);
-    repo = rows[0];
-  } else if (channel === "pr-activity") {
+    return await authorizeSseRepo(rows[0], user.id, db, orgMembers, and, eq);
+  }
+
+  if (rest === "pr-activity") {
     // Fanout channel carrying only (runId, prId) ticks, not content; any
     // authenticated user may listen.
     return true;
-  } else {
-    return false;
   }
+  return false;
+}
+
+async function authorizeSseRepo(
+  repo: { orgId: number; visibility: string } | undefined,
+  userId: number,
+  db: typeof import("@forge/db").db,
+  orgMembers: typeof import("@forge/db").orgMembers,
+  and: typeof import("drizzle-orm").and,
+  eq: typeof import("drizzle-orm").eq,
+): Promise<boolean> {
   if (!repo) return false;
   if (repo.visibility === "public") return true;
   const member = await db
     .select({ id: orgMembers.id })
     .from(orgMembers)
-    .where(and(eq(orgMembers.orgId, repo.orgId), eq(orgMembers.userId, user.id)))
+    .where(and(eq(orgMembers.orgId, repo.orgId), eq(orgMembers.userId, userId)))
     .limit(1);
   return member.length > 0;
 }

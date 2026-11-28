@@ -19,7 +19,7 @@ export function LiveLogs({ org, repo, prNumber, initial }: {
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const es = new EventSource(`/api/sse/pr-${prNumber}`);
+    const es = new EventSource(`/api/sse/${org}/${repo}/pr-${prNumber}`);
     es.addEventListener("open", () => setLive(true));
     es.addEventListener("log", (ev) => {
       try {
@@ -30,7 +30,7 @@ export function LiveLogs({ org, repo, prNumber, initial }: {
     es.addEventListener("tick", () => setLive(true));
     es.onerror = () => setLive(false);
     return () => es.close();
-  }, [prNumber]);
+  }, [org, repo, prNumber]);
 
   useEffect(() => {
     boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight });
