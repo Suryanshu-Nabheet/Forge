@@ -24,7 +24,7 @@ An AI-native alternative to GitHub: intent-first version control, autonomous PR 
 | **Semantic code search & Q&A** | Pushes trigger indexing: files are chunked (symbol-aware for code, heading-aware for prose) and embedded. `/search` does global semantic search; the repo "Ask AI" page answers natural-language questions with file:line citations. |
 | **Spec-to-PR workflow** | "Draft implementation plan" generates a structured plan (files to create/modify, steps, acceptance criteria). "Create branch scaffold" pushes a spec branch with a committed `docs/intents/*.md`. |
 | **Ephemeral previews** | Every PR push attempts a containerized build when Docker is available (non-root, no network, read-only source, resource limits, lifecycle scripts disabled during install). If Docker is unavailable, repository code is not executed on the Forge host and the preview is marked unavailable. Repository Dockerfiles are currently rejected because building them through the host Docker daemon is unsafe. Build logs stream into the PR page. |
-| **Zero-config local dev** | Postgres is the only hard dependency. Queue, embeddings, and sandbox all have local fallbacks; Redis, Docker, pgvector, and the Claude API slot in automatically when present. |
+| **Zero-config local dev** | Postgres is the only hard dependency. Queue, embeddings, and sandbox all have local fallbacks; Redis, Docker, pgvector, and the Claude API slot in automatically when present. Setting `REDIS_URL` additionally makes the login brute-force limiter shared across replicas. |
 
 ## Quickstart
 

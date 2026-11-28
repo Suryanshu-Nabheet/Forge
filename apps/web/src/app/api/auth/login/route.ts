@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 import {
-  loginUser, createSession, loginBlocked, recordLoginFailure, clearLoginFailures,
+  loginUser, createSession, loginBlockedAsync, recordLoginFailureAsync, clearLoginFailuresAsync,
   recordAudit, verifyTotpAt, decryptSecret, consumeRecoveryCode,
 } from "@forge/db";
 import { and, eq } from "drizzle-orm";
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   const email = (body.email ?? "").trim().toLowerCase(); // register lowercases; match it
   const ip = "login"; // single bucket; see note above
 
-  if (loginBlocked(email, ip)) {
+  if (await loginBlockedAsync(email, ip)) {
     void recordAudit({ actorId: null, actorHandle: email, action: "auth.login_locked", targetType: "account", targetId: email, ip: clientIp(req) });
     return NextResponse.json(
       { error: "too many attempts — wait a minute and try again" },
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   if (body.code || body.recoveryCode) {
     const user = await loginUser(email, body.password ?? "");
     if (!user) {
-      recordLoginFailure(email, ip);
+      await recordLoginFailureAsync(email, ip);
       return NextResponse.json({ error: "invalid credentials" }, { status: 401 });
     }
     const row = (await db
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
       // for the single-process model.
       const last = row.totpLastCounter ?? null;
       if (counter === null || (last !== null && counter <= last)) {
-        recordLoginFailure(email, ip);
+        await recordLoginFailureAsync(email, ip);
         void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.totp_failed", targetType: "account", targetId: user.handle, ip: clientIp(req) });
         return NextResponse.json({ error: "invalid code" }, { status: 401 });
       }
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       }
       const remaining = consumeRecoveryCode(row.recoveryCodes, String(body.recoveryCode));
       if (remaining === null) {
-        recordLoginFailure(email, ip);
+        await recordLoginFailureAsync(email, ip);
         void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.recovery_failed", targetType: "account", targetId: user.handle, ip: clientIp(req) });
         return NextResponse.json({ error: "invalid recovery code" }, { status: 401 });
       }
@@ -89,13 +89,13 @@ export async function POST(req: Request) {
         .returning({ id: users.id });
       if (consumed.length === 0) {
         // A concurrent login consumed a code from the same list first.
-        recordLoginFailure(email, ip);
+        await recordLoginFailureAsync(email, ip);
         return NextResponse.json({ error: "invalid recovery code" }, { status: 401 });
       }
       void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.recovery_used", targetType: "account", targetId: user.handle, ip: clientIp(req) });
     }
 
-    clearLoginFailures(email, ip);
+    await clearLoginFailuresAsync(email, ip);
     void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.login", targetType: "account", targetId: user.handle, ip: clientIp(req) });
     const token = await createSession(user.id);
     const res = NextResponse.json({ ok: true, user });
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
   // Stage 1: password-only. If 2FA is on, do NOT create a session yet.
   const user = await loginUser(email, body.password ?? "");
   if (!user) {
-    recordLoginFailure(email, ip);
+    await recordLoginFailureAsync(email, ip);
     void recordAudit({ actorId: null, actorHandle: email, action: "auth.login_failed", targetType: "account", targetId: email, ip: clientIp(req) });
     return NextResponse.json({ error: "invalid credentials" }, { status: 401 });
   }
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ totpRequired: true });
   }
 
-  clearLoginFailures(email, ip);
+  await clearLoginFailuresAsync(email, ip);
   void recordAudit({ actorId: user.id, actorHandle: user.handle, action: "auth.login", targetType: "account", targetId: user.handle, ip: clientIp(req) });
   const token = await createSession(user.id);
   const res = NextResponse.json({ ok: true, user });

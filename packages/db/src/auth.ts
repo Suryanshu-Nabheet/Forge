@@ -140,6 +140,100 @@ const WINDOW_MS = 60_000;
 const MAX_TRACKED_KEYS = 10_000;
 const failures = new Map<string, number[]>();
 
+// ---------- Redis-backed limiter (multi-replica deployments) ----------
+// Feature-detected: REDIS_URL set → shared sliding window across replicas.
+// Absent → the in-memory Map below (single-process topology). Same API,
+// same semantics; Redis failures degrade to in-memory rather than
+// locking people out.
+
+interface RedisLike {
+  lrange(key: string, start: number, stop: number): Promise<string[]>;
+  rpush(key: string, ...values: string[]): Promise<number>;
+  ltrim(key: string, start: number, stop: number): Promise<"OK" | null>;
+  expire(key: string, seconds: number): Promise<number>;
+  del(key: string, ...keys: string[]): Promise<number>;
+}
+
+let redis: RedisLike | null = null;
+let redisInit: Promise<RedisLike | null> | null = null;
+
+async function getRedis(): Promise<RedisLike | null> {
+  if (redis) return redis;
+  if (!redisInit) {
+    redisInit = (async () => {
+      if (!process.env.REDIS_URL) return null;
+      try {
+        const mod = await import("ioredis");
+        const client = new mod.default(process.env.REDIS_URL, {
+          lazyConnect: false,
+          maxRetriesPerRequest: 1,
+          connectTimeout: 2000,
+        });
+        client.on("error", (err) => console.error("[db] redis error:", err.message));
+        return client as unknown as RedisLike;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  redis = await redisInit;
+  return redis;
+}
+
+const failuresKey = (email: string, ip: string) => `forge:loginfail:${Buffer.from(`${email}|${ip}`).toString("base64url")}`;
+
+async function redisBlocked(email: string, ip: string): Promise<boolean | null> {
+  const r = await getRedis();
+  if (!r) return null;
+  try {
+    const now = Date.now();
+    const cutoff = now - WINDOW_MS;
+    const key = failuresKey(email, ip);
+    const raw = await r.lrange(key, 0, -1);
+    const fresh = raw.map(Number).filter((t) => t > cutoff);
+    await r.ltrim(key, -MAX_FAILURES * 2, -1);
+    return fresh.length >= MAX_FAILURES;
+  } catch {
+    return null; // degrade to in-memory
+  }
+}
+
+async function redisRecord(email: string, ip: string): Promise<void> {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    const key = failuresKey(email, ip);
+    await r.rpush(key, String(Date.now()));
+    await r.expire(key, Math.ceil(WINDOW_MS / 1000) + 5);
+  } catch { /* degrade */ }
+}
+
+async function redisClear(email: string, ip: string): Promise<void> {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.del(failuresKey(email, ip));
+  } catch { /* degrade */ }
+}
+
+// The public API stays synchronous-looking to callers; the login route
+// awaits the async variants when Redis is configured.
+export async function loginBlockedAsync(email: string, ip: string): Promise<boolean> {
+  const viaRedis = await redisBlocked(email, ip);
+  if (viaRedis !== null) return viaRedis;
+  return loginBlocked(email, ip);
+}
+
+export async function recordLoginFailureAsync(email: string, ip: string): Promise<void> {
+  await redisRecord(email, ip);
+  recordLoginFailure(email, ip); // in-memory fallback covers the Redis-less case
+}
+
+export async function clearLoginFailuresAsync(email: string, ip: string): Promise<void> {
+  await redisClear(email, ip);
+  clearLoginFailures(email, ip);
+}
+
 function pruneFailures(now: number): void {
   for (const [key, list] of failures) {
     const fresh = list.filter((t) => now - t < WINDOW_MS);
