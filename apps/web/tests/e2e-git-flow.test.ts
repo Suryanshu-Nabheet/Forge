@@ -14,6 +14,7 @@ import { adminDsn, testDbDsn } from "./helpers/db";
 const exec = promisify(execFile);
 
 const PORT = 3105;
+const SSH_PORT = 3223;
 const BASE = `http://localhost:${PORT}`;
 const TEST_DB = process.env.FORGE_TEST_DB ?? "forge_test";
 const ROOT = process.cwd();
@@ -74,6 +75,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       FORGE_PORT: String(PORT),
+      FORGE_SSH_PORT: String(SSH_PORT),
       DATABASE_URL: testDbDsn(TEST_DB),
       FORGE_STORAGE_ROOT: DATA,
     },

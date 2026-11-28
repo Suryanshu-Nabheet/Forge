@@ -15,6 +15,7 @@ import { adminDsn, testDbDsn } from "./helpers/db";
 const exec = promisify(execFile);
 
 const PORT = 3109;
+const SSH_PORT = 3226;
 const BASE = `http://localhost:${PORT}`;
 const TEST_DB = "forge_test5";
 const ROOT = process.cwd();
@@ -87,6 +88,7 @@ beforeAll(async () => {
       FORGE_PORT: String(PORT),
       DATABASE_URL: testDbDsn(TEST_DB),
       FORGE_STORAGE_ROOT: DATA,
+      FORGE_SSH_PORT: String(SSH_PORT),
       // The failure-path webhook test needs to register a localhost target.
       FORGE_WEBHOOK_ALLOW_PRIVATE_TARGETS: "1",
     },
