@@ -32,8 +32,7 @@
     "react": "19.2.1",
     "react-dom": "19.2.1",
     "shiki": "^4.6.0",
-    "ssh2": "^1.17.0",
-    "tsx": "^4.20.0"
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
@@ -44,6 +43,7 @@
     "@types/ssh2": "^1.15.6",
     "drizzle-kit": "^0.31.11",
     "tailwindcss": "^4.1.17",
+    "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "vitest": "^5.1.2"
   }
