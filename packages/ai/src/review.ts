@@ -153,17 +153,19 @@ export function heuristicReview(diff: DiffFile[]): ReviewAnalysis {
   }
 
   const missing = missingTests(diff);
-  for (const path of missing.slice(0, 10)) {
+  if (missing.length > 0) {
     findings.push({
-      path,
+      path: missing[0]!,
       line: null,
       side: "new",
       severity: "warning",
-      category: "tests",
-      title: "No test coverage for changed file",
-      detail: `The diff changes \`${path}\` but no test file in this diff covers it. Consider adding tests for the changed behavior.`,
+      "category": "tests",
+      title: "Missing test coverage for changed files",
+      detail:
+        `The diff changes ${missing.length} source file${missing.length === 1 ? "" : "s"} without test changes: ` +
+        missing.slice(0, 10).map((p) => `\`${p}\``).join(", ") +
+        `${missing.length > 10 ? " …" : ""}. Consider adding tests for the changed behavior.`,
     });
-    break; // one aggregate finding is enough for the missing-tests signal
   }
 
   // Deduplicate identical findings (same path+line+rule).
@@ -217,15 +219,46 @@ ${diffText}`,
   });
 
   const text = textOf(response);
-  const parsed = JSON.parse(extractJson(text)) as ReviewAnalysis;
+  const parsed = parseReviewAnalysis(text);
   return { ...parsed, mode: "claude" };
 }
 
+const SEVERITIES = new Set(["info", "warning", "critical"]);
+const CATEGORIES = new Set(["security", "logic", "tests", "style", "performance"]);
+
+/** Extract the outermost JSON object from a model response. */
 function extractJson(text: string): string {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("no JSON in claude response");
   return text.slice(start, end + 1);
+}
+
+/** Parse + shape-validate a Claude review response; falls back to a safe default on garbage. */
+export function parseReviewAnalysis(text: string): ReviewAnalysis {
+  const raw: unknown = JSON.parse(extractJson(text));
+  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
+  const summary = typeof obj.summary === "string" ? obj.summary : "Review completed, but the analysis output was malformed.";
+  const riskScore = typeof obj.riskScore === "number" && Number.isFinite(obj.riskScore)
+    ? Math.max(0, Math.min(100, Math.round(obj.riskScore)))
+    : 0;
+  const findings: ReviewFinding[] = Array.isArray(obj.findings)
+    ? obj.findings.flatMap((f): ReviewFinding[] => {
+        if (!f || typeof f !== "object") return [];
+        const r = f as Record<string, unknown>;
+        if (typeof r.path !== "string" || typeof r.title !== "string" || typeof r.detail !== "string") return [];
+        const severity = SEVERITIES.has(r.severity as string) ? (r.severity as ReviewFinding["severity"]) : "warning";
+        const category = CATEGORIES.has(r.category as string) ? (r.category as ReviewFinding["category"]) : "logic";
+        const side: "old" | "new" = r.side === "old" ? "old" : "new";
+        const line = typeof r.line === "number" && Number.isInteger(r.line) && r.line >= 0 ? r.line : null;
+        const suggestion = typeof r.suggestion === "string" ? r.suggestion : undefined;
+        return [{ path: r.path, line, side, severity, category, title: r.title, detail: r.detail, suggestion }];
+      })
+    : [];
+  const missingTestsFor = Array.isArray(obj.missingTestsFor)
+    ? obj.missingTestsFor.filter((p): p is string => typeof p === "string")
+    : [];
+  return { summary, riskScore, findings, missingTestsFor, mode: "claude" };
 }
 
 function renderDiffForPrompt(diff: DiffFile[]): string {

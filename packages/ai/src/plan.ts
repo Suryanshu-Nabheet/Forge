@@ -2,6 +2,7 @@
 
 import type { ImplementationPlan } from "@forge/shared";
 import type { EmbeddedChunk } from "./embeddings";
+import { embedLocal, cosine } from "./embeddings";
 import { aiMode } from "./client";
 
 export interface PlanInput {
@@ -22,18 +23,25 @@ export async function generatePlan(input: PlanInput, chunks: EmbeddedChunk[]): P
 
 function heuristicPlan(input: PlanInput, chunks: EmbeddedChunk[]): ImplementationPlan {
   const slug = slugify(input.title);
-  // Derive candidate files from the semantic index: paths whose content
-  // best matches the intent description are "files to modify".
-  const relevant = chunks
-    .filter((c) => c.kind === "symbol")
-    .slice(0, 40);
-  const pathScores = new Map<string, number>();
-  for (const c of relevant) {
-    pathScores.set(c.path, (pathScores.get(c.path) ?? 0) + 1);
+  // Rank candidate files by embedding similarity to the intent description,
+  // aggregating per path (best chunk score wins, ties broken by frequency).
+  const qv = embedLocal(`${input.title}\n${input.description}`, null);
+  const pathScores = new Map<string, { best: number; count: number }>();
+  for (const c of chunks) {
+    if (c.kind !== "symbol") continue;
+    const s = cosine(qv, c.embedding);
+    const cur = pathScores.get(c.path);
+    if (cur) {
+      cur.best = Math.max(cur.best, s);
+      cur.count += 1;
+    } else {
+      pathScores.set(c.path, { best: s, count: 1 });
+    }
   }
   const filesToModify = [...pathScores.entries()]
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => b[1].best - a[1].best || b[1].count - a[1].count)
     .slice(0, 4)
+    .filter(([, v]) => v.best > 0)
     .map(([path]) => ({ path, purpose: `Likely touchpoint for "${input.title}" (matched by semantic index)` }));
 
   return {
@@ -61,7 +69,7 @@ function heuristicPlan(input: PlanInput, chunks: EmbeddedChunk[]): Implementatio
       "Scope creep: keep the first PR minimal and iterate.",
       "Semantic suggestions may point at stale code — verify touchpoints before editing.",
     ],
-    branchName: `i-unknown-${slug}`.replace("unknown-", ""),
+    branchName: `i-${slug}`,
   };
 }
 
@@ -104,8 +112,41 @@ ${context}`,
     ],
   });
   const text = textOf(response);
+  return parseImplementationPlan(text, input.title);
+}
+
+/** Parse + shape-validate a Claude plan response; throws on unusable output. */
+export function parseImplementationPlan(text: string, fallbackTitle: string): ImplementationPlan {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  const parsed = JSON.parse(text.slice(start, end + 1)) as ImplementationPlan;
-  return parsed;
+  if (start === -1 || end === -1) throw new Error("no JSON in claude response");
+  const raw: unknown = JSON.parse(text.slice(start, end + 1));
+  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
+  const overview = typeof obj.overview === "string" ? obj.overview : "";
+  const branchName = typeof obj.branchName === "string" && obj.branchName.trim()
+    ? obj.branchName
+    : `i-${slugify(fallbackTitle)}`;
+  const parseFileList = (v: unknown): Array<{ path: string; purpose: string }> =>
+    Array.isArray(v)
+      ? v.flatMap((e) => {
+          if (!e || typeof e !== "object") return [];
+          const r = e as Record<string, unknown>;
+          if (typeof r.path !== "string" || !r.path) return [];
+          return [{ path: r.path, purpose: typeof r.purpose === "string" ? r.purpose : "" }];
+        })
+      : [];
+  const parseStringList = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+  if (!overview && parseFileList(obj.filesToCreate).length === 0 && parseStringList(obj.steps).length === 0) {
+    throw new Error("claude plan output missing required fields");
+  }
+  return {
+    overview,
+    filesToCreate: parseFileList(obj.filesToCreate),
+    filesToModify: parseFileList(obj.filesToModify),
+    steps: parseStringList(obj.steps),
+    acceptanceCriteria: parseStringList(obj.acceptanceCriteria),
+    risks: parseStringList(obj.risks),
+    branchName,
+  };
 }

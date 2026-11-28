@@ -95,17 +95,22 @@ ${context}`,
     ],
   });
   const text = textOf(response);
-  return {
-    question,
-    answer: text,
-    citations: top.map((c) => ({
+  // Only the chunks the answer actually cites ([n] markers) become citations.
+  const citedIdx = new Set<number>();
+  for (const m of text.matchAll(/\[(\d+)\]/g)) {
+    const n = Number(m[1]);
+    if (Number.isInteger(n) && n >= 0 && n < top.length) citedIdx.add(n);
+  }
+  const citations = [...citedIdx].map((i) => {
+    const c = top[i]!;
+    return {
       path: c.path,
       lineStart: c.lineStart,
       lineEnd: c.lineEnd,
       symbol: c.symbol,
       snippet: firstMeaningfulLines(c.content),
-    })),
-    confidence: 0.9,
-    mode: "claude",
-  };
+    };
+  });
+  const confidence = citations.length > 0 ? Math.min(0.9, 0.5 + citations.length * 0.05) : 0.2;
+  return { question, answer: text, citations, confidence, mode: "claude" };
 }

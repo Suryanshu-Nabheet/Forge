@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -46,7 +47,11 @@ export const sshKeys = pgTable(
     publicKey: text("public_key").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("ssh_keys_user_idx").on(t.userId)],
+  (t) => [
+    index("ssh_keys_user_idx").on(t.userId),
+    index("ssh_keys_fingerprint_idx").on(t.fingerprint),
+    uniqueIndex("ssh_keys_public_key_idx").on(t.publicKey),
+  ],
 );
 
 export const personalAccessTokens = pgTable(
@@ -61,6 +66,8 @@ export const personalAccessTokens = pgTable(
     prefix: text("prefix").notNull(), // first chars for display
     scopes: jsonb("scopes").$type<string[]>().notNull().default(["repo:read"]),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }), // null = no expiry
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("pat_hash_idx").on(t.tokenHash)],

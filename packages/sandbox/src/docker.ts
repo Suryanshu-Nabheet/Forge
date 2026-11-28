@@ -1,16 +1,25 @@
 // Docker sandbox adapter — used when `docker info` responds.
 // Same interface as the process adapter. Build runs with cpus/memory caps,
-// tmpfs, no network except npm registry, logs streamed, stopped on timeout.
+// tmpfs, non-root user, no network, lifecycle-script prescan, logs streamed,
+// stopped on timeout.
 
 import { execFile, spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { extractArchive, sandboxDirFor } from "@forge/git";
+import { scanPackageJson } from "./scanner";
+import { revParse, catFileText } from "@forge/git";
 import type { BuildSpec, BuildResult } from "./process";
 
 const TIMEOUT_MS = 120_000;
 const CPUS = "1.0";
 const MEM = "512m";
+// Builds run with `--network none`: the container gets no outbound access at
+// all. That is a deliberate fail-closed choice — a bridge network would let
+// untrusted build code reach arbitrary hosts. The tradeoff (npm install of
+// external dependencies fails inside the sandbox) is surfaced per-build in
+// the log line below, and dependency-free or offline projects still build.
+
 
 async function dockerAvailable(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -46,6 +55,15 @@ export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
       return { ok: false, exitCode: null, durationMs: Date.now() - startedAt, adapter: "docker", output: "Dockerfile builds are disabled" };
     }
 
+    // Prescan lifecycle scripts from the committed package.json (same policy
+    // as the process adapter) before the container runs anything.
+    const pkgRaw = await packageJsonAt(spec.gitDir, spec.commitSha);
+    const scan = scanPackageJson(pkgRaw);
+    if (!scan.ok) {
+      spec.onLog(`[sandbox:docker] BLOCKED: ${scan.reason}`);
+      return { ok: false, exitCode: null, durationMs: Date.now() - startedAt, adapter: "docker", output: scan.reason ?? "blocked" };
+    }
+
     const script = "cp -R /src/. /work/ && cd /work && npm install --no-audit --no-fund --ignore-scripts && npm run build --if-present";
 
     const args = [
@@ -67,6 +85,7 @@ export async function runDockerBuild(spec: BuildSpec): Promise<BuildResult> {
       "node:22-alpine",
       "sh", "-c", script,
     ];
+    spec.onLog("[sandbox:docker] network is disabled — `npm install` of external dependencies will fail; vendored/offline deps still build");
     spec.onLog(`[sandbox:docker] docker ${args.slice(0, 6).join(" ")}…`);
 
     const result = await streamCommand(args, containerName, spec.onLog);
@@ -119,4 +138,11 @@ async function fileExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Look up package.json content at the commit (prescan before build). */
+async function packageJsonAt(gitDir: string, sha: string): Promise<string | null> {
+  const blobSha = await revParse(gitDir, `${sha}:package.json`);
+  if (!blobSha) return null;
+  return catFileText(gitDir, blobSha, 256 * 1024);
 }
