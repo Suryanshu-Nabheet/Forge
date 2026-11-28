@@ -101,6 +101,36 @@ FORGE_HOOK_TOKEN=...                                 # shared secret for git hoo
 FORGE_SECRET=...                                     # encryption key for TOTP secrets at rest (set for stable 2FA across restarts)
 ```
 
+## Deploying (self-hosted)
+
+```bash
+# 1. Required env: FORGE_SECRET (AES key for TOTP secrets at rest).
+export FORGE_SECRET="$(openssl rand -hex 32)"
+export FORGE_EXTERNAL_URL="https://forge.example.com"   # behind a proxy
+
+# 2. Boot the stack (app + Postgres; storage volume for bare repos).
+docker compose up -d --build
+
+# 3. Migrations apply automatically at boot. Watch:
+docker compose logs -f web
+```
+
+Operational notes:
+- **Probes**: liveness `GET /healthz`, readiness `GET /healthz/ready`
+  (checks Postgres; returns 503 while the process is draining so load
+  balancers stop routing).
+- **Webhook egress**: `FORGE_WEBHOOK_EGRESS` = `public` (default, only
+  public targets), `private-allow` (internal CI reachable — compose
+  default), or `allowlist` + `FORGE_WEBHOOK_PRIVATE_CIDRS=10.0.0.0/8,…`.
+  DNS is resolved and pinned at delivery time (rebinding-safe).
+- **Topology**: single app replica + optional standalone workers
+  (`pnpm worker`) is the supported deployment. The in-process login
+  limiter, SSE fanout, and review locks are per-process by design.
+- **Storage**: back up `FORGE_STORAGE_ROOT` (bare repos + SSH host key)
+  consistently with the database — see `docs/backup.md`.
+- **2FA**: set `FORGE_SECRET` or TOTP secrets cannot survive restarts
+  (the server fails to boot in production if secrets exist without it).
+
 ## Architecture
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md). Monorepo map:
