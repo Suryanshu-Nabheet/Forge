@@ -145,8 +145,10 @@ async function syncBranch(
               .values({
                 repoId,
                 number: max + 1,
-                title: it.title,
-                description: `Implements intent #${it.number}: ${it.title}`,
+                // Conventional-commit style title from the branch slug,
+                // with the intent linked in the description.
+                title: autoPrTitle(branchName, it.title),
+                description: `Implements intent #${it.number}: ${it.title}\n\nAuto-opened from branch \`${branchName}\`.`,
                 baseBranch: repoDefaultBranch,
                 headBranch: branchName,
                 headSha: newSha,
@@ -279,4 +281,20 @@ async function changedPathsBetween(gitDir: string, base: string, head: string): 
   } catch {
     return [];
   }
+}
+
+/**
+ * Draft a conventional-commit-ish PR title from the intent branch name:
+ * `i12-fix-login-timeout` -> "Fix login timeout (i12)". Falls back to the
+ * intent title when the branch isn't parseable.
+ */
+function autoPrTitle(branchName: string, fallbackTitle: string): string {
+  const m = /^i(\d+)-(.+)$/.exec(branchName);
+  if (!m) return fallbackTitle;
+  const slug = m[2]!;
+  const intentNum = m[1]!;
+  const words = slug.replace(/[-_]+/g, " ").trim();
+  if (!words) return fallbackTitle;
+  const capitalized = words.charAt(0).toUpperCase() + words.slice(1);
+  return `${capitalized} (i${intentNum})`;
 }
