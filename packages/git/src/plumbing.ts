@@ -204,3 +204,59 @@ export async function commitStats(gitDir: string, sha: string): Promise<{ additi
     return { additions: 0, deletions: 0 };
   }
 }
+
+// ---------- blame ----------
+
+export interface BlameLine {
+  sha: string;
+  authorName: string;
+  authoredAt: string;
+  lineNumber: number;
+  content: string;
+}
+
+/**
+ * Per-line authorship for a file at a commit (git blame --porcelain).
+ * Each `<sha> <origLine> <finalLine>` header is followed by a tab-prefixed
+ * content line for that final line; author metadata lines follow each NEW
+ * sha group (repeats omit them), so metadata is cached per sha.
+ */
+export async function blameFile(gitDir: string, sha: string, path: string, maxBytes = 512 * 1024): Promise<BlameLine[] | null> {
+  let out: string;
+  try {
+    out = await gitIn(gitDir, ["blame", "--porcelain", sha, "--", path], { maxBuffer: maxBytes + 4096 });
+  } catch {
+    return null;
+  }
+  if (Buffer.byteLength(out) > maxBytes) return null;
+
+  const metaBySha = new Map<string, { authorName: string; authoredAt: string }>();
+  let pendingSha = "";
+  let pendingMeta = { authorName: "", authoredAt: "" };
+  const lines: BlameLine[] = [];
+
+  for (const raw of out.split("\n")) {
+    const header = /^([0-9a-f]{40}) (\d+) (\d+)/.exec(raw);
+    if (header) {
+      pendingSha = header[1]!;
+      pendingMeta = metaBySha.get(pendingSha) ?? { authorName: "", authoredAt: "" };
+      continue;
+    }
+    if (raw.startsWith("\t")) {
+      lines.push({
+        sha: pendingSha,
+        authorName: pendingMeta.authorName,
+        authoredAt: pendingMeta.authoredAt,
+        lineNumber: lines.length + 1,
+        content: raw.slice(1),
+      });
+      continue;
+    }
+    const author = /^author (.+)$/.exec(raw);
+    if (author) pendingMeta.authorName = author[1]!;
+    const time = /^author-time (\d+)$/.exec(raw);
+    if (time) pendingMeta.authoredAt = new Date(Number(time[1]!) * 1000).toISOString();
+    if (author || time) metaBySha.set(pendingSha, { ...pendingMeta });
+  }
+  return lines;
+}

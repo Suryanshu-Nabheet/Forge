@@ -557,3 +557,48 @@ describe("webhook redelivery", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("repo front-door: README, raw files, blame", () => {
+  it("renders the README, serves raw downloads, and blames a file", async () => {
+    // Push content: README + a source file across two commits.
+    const pat = await sfetch(`/api/pats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "t3", scopes: ["repo:read", "repo:write"] }),
+    });
+    const patBody = (await pat.json()) as { token: string };
+    const pushUrl = `http://eva:${patBody.token}@localhost:${PORT}/git/corp/widget.git`;
+    await git(["-C", work, "checkout", "--quiet", "-b", "frontdoor"]);
+    await exec("bash", ["-c", `cd ${work} && printf '# Widget\\n\\nHello **world**.\\n' > README.md && printf 'line a\\nline b\\n' > src.txt`]);
+    await git(["-C", work, "add", "."]);
+    await git(["-C", work, "commit", "--quiet", "-m", "add readme"]);
+    await exec("bash", ["-c", `cd ${work} && printf 'line a\\nline b changed\\n' > src.txt`]);
+    await git(["-C", work, "commit", "--all", "--quiet", "-m", "tweak line"]);
+    await git(["-C", work, "push", "--quiet", pushUrl, "HEAD:refs/heads/frontdoor"]);
+
+    // README renders on the repo front page (server component).
+    const page = await fetch(`${BASE}/corp/widget?ref=frontdoor`);
+    const html = await page.text();
+    expect(page.ok).toBe(true);
+    expect(html).toContain("Hello");
+    expect(html).toContain("<strong>world</strong>");
+
+    // Raw file: correct content type, exact bytes, download disposition.
+    const raw = await fetch(`${BASE}/raw/corp/widget/README.md?ref=frontdoor`);
+    expect(raw.ok).toBe(true);
+    expect(raw.headers.get("Content-Type")).toContain("text/plain");
+    expect(await raw.text()).toContain("Hello **world**.");
+    const dl = await fetch(`${BASE}/raw/corp/widget/README.md?ref=frontdoor&download=1`);
+    expect(dl.headers.get("Content-Disposition")).toContain("attachment");
+
+    // Markdown FileView renders bold; blame attributes lines across commits.
+    const filePage = await fetch(`${BASE}/corp/widget?ref=frontdoor&path=README.md`);
+    expect(await filePage.text()).toContain("<strong>world</strong>");
+    const blamePage = await fetch(`${BASE}/corp/widget/blame/src.txt?ref=frontdoor`);
+    const blameHtml = await blamePage.text();
+    expect(blamePage.ok).toBe(true);
+    expect(blameHtml).toContain("line b changed");
+    // Both commits appear in the blame gutter.
+    expect(blameHtml).toMatch(/add readme|tweak line/);
+  });
+});

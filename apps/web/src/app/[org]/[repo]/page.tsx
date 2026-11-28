@@ -2,6 +2,7 @@ import { findVisibleRepo } from "@/server/authz";
 import { listBranchesDb, resolveBranchSha, repoTree, repoBlob, repoCommits } from "@/server/api";
 import { repoGitDir } from "@forge/git";
 import Link from "next/link";
+import { Markdown } from "@/components/Markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,16 @@ export default async function CodePage({ params, searchParams }: PageProps) {
   const commits = sha ? await repoCommits(gitDir, sha, 10) : [];
   const blob = fileBlob;
 
+  // README panel: find a README* entry in this directory and render it.
+  const readmeEntry = entries.find((e) => /^readme(\.\w+)?$/i.test(e.path.split("/").pop() ?? ""));
+  let readme: { path: string; content: string } | null = null;
+  if (!isFile && readmeEntry && sha) {
+    const content = await repoBlob(gitDir, sha, treePath ? `${treePath}/${readmeEntry.path}` : readmeEntry.path);
+    if (content && !content.isBinary && content.content) {
+      readme = { path: readmeEntry.path, content: content.content };
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
       {/* left: branch + tree */}
@@ -43,18 +54,36 @@ export default async function CodePage({ params, searchParams }: PageProps) {
         </div>
 
         {isFile && blob ? (
-          <FileView path={treePath} blob={blob} />
+          <FileView org={org} repo={repo} branch={branch} sha={sha} path={treePath} blob={blob} />
         ) : (
           <div className="card divide-y">
             {treePath && <UpDir org={org} repo={repo} branch={branch} treePath={treePath} />}
-            {entries.length === 0 && (
-              <div className="px-4 py-8 text-center text-[var(--text-dim)] text-[13px]">
-                Empty repository — push your first commit.
+            {entries.length === 0 && !treePath && (
+              <div className="px-6 py-6 text-[13px] space-y-3">
+                <div className="text-[var(--text-dim)]">
+                  Empty repository. Push your first commit:
+                </div>
+                <pre className="mono text-[12px] p-3 rounded border bg-[var(--bg)] overflow-x-auto">{[
+                  "git init",
+                  `git remote add origin ${cloneBase()}/git/${org}/${repo}.git`,
+                  'echo "# ' + repo + '" > README.md',
+                  "git add . && git commit -m \"first commit\"",
+                  "git push -u origin main",
+                ].join("\n")}</pre>
               </div>
             )}
             {entries.map((e) => (
               <TreeRow key={e.path} org={org} repo={repo} branch={branch} entry={e} treePath={treePath} />
             ))}
+          </div>
+        )}
+
+        {readme && (
+          <div className="card mt-5 overflow-hidden">
+            <div className="px-4 py-2 border-b text-[13px] mono text-[var(--text-dim)]">{readme.path}</div>
+            <div className="p-4 text-[13px] leading-relaxed">
+              <Markdown text={readme.content} />
+            </div>
           </div>
         )}
 
@@ -118,17 +147,53 @@ function TreeRow({ org, repo, branch, entry, treePath }: {
   );
 }
 
-function FileView({ path, blob }: { path: string; blob: { content: string | null; isBinary: boolean } }) {
+function FileView({ org, repo, branch, sha, path, blob }: {
+  org: string; repo: string; branch: string; sha: string | null;
+  path: string; blob: { content: string | null; isBinary: boolean };
+}) {
+  const rawUrl = `/raw/${org}/${repo}/${path}?ref=${encodeURIComponent(branch)}`;
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const isImage = ["png", "jpg", "jpeg", "gif", "svg", "webp", "ico"].includes(ext);
+  const isMarkdown = ext === "md" || ext === "markdown";
+  const lines = blob.content ? blob.content.split("\n") : [];
   return (
     <div className="card overflow-hidden">
-      <div className="px-4 py-2 border-b text-[13px] mono text-[var(--text-dim)]">{path}</div>
-      {blob.isBinary ? (
-        <div className="px-4 py-8 text-center text-[var(--text-dim)] text-[13px]">Binary file</div>
+      <div className="px-4 py-2 border-b flex items-center gap-3 flex-wrap">
+        <span className="text-[13px] mono text-[var(--text-dim)] flex-1">{path}</span>
+        {isMarkdown && blob.content && (
+          <a className="btn px-2 py-0.5 text-xs" href={rawUrl}>Raw</a>
+        )}
+        <a className="btn px-2 py-0.5 text-xs" href={`${rawUrl}&download=1`}>Download</a>
+        {sha && (
+          <a className="btn px-2 py-0.5 text-xs" title="Permalink to this file at this commit"
+            href={`/${org}/${repo}/blame/${path}?ref=${encodeURIComponent(branch)}`}>Blame</a>
+        )}
+      </div>
+      {isImage ? (
+        <div className="p-6 flex justify-center bg-[var(--bg)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={rawUrl} alt={path} className="max-h-[70vh] rounded border" />
+        </div>
+      ) : blob.isBinary ? (
+        <div className="px-4 py-8 text-center text-[var(--text-dim)] text-[13px]">
+          Binary file — <a className="text-[var(--accent)]" href={`${rawUrl}&download=1`}>download</a>
+        </div>
       ) : blob.content === null ? (
         <div className="px-4 py-8 text-center text-[var(--text-dim)] text-[13px]">File too large to display</div>
+      ) : isMarkdown ? (
+        <div className="p-4 text-[13px] leading-relaxed">
+          <Markdown text={blob.content} />
+        </div>
       ) : (
         <pre className="overflow-x-auto p-4 text-[12.5px] mono leading-relaxed" style={{ maxHeight: "70vh" }}>
-          {blob.content}
+          {lines.map((content, i) => (
+            <span key={i} id={`L${i + 1}`} className="block hover:bg-[var(--bg-hover)] group">
+              <span className="inline-block w-10 pr-2 mr-3 text-right text-[var(--text-faint)] select-none border-r group-hover:text-[var(--accent)]">
+                {i + 1}
+              </span>
+              {content || " "}
+            </span>
+          ))}
         </pre>
       )}
     </div>
