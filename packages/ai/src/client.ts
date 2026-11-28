@@ -37,7 +37,7 @@ export function textOf(response: { content: Array<{ type: string; text?: string 
 }
 
 // Re-export the analysis entry points so callers have one import surface.
-export { analyzeDiffForReview } from "./review";
+export { analyzeDiffForReview, triageLabels } from "./review";
 export { answerQuestion } from "./qa";
 export { generatePlan } from "./plan";
 export { embedChunks } from "./embeddings";

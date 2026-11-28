@@ -275,3 +275,33 @@ function renderDiffForPrompt(diff: DiffFile[]): string {
   }
   return parts.join("\n");
 }
+
+// ---------- issue auto-triage (deterministic) ----------
+
+const LABEL_RULES: Array<{ label: string; test: RegExp }> = [
+  { label: "security", test: /\b(security|vulnerab(?:le|ility)|cve|exploit|xss|csrf|injection|auth(?:oriz|ent)(?:ation|ed)?|privilege|secret|leak)\b/i },
+  { label: "bug", test: /\b(bug|crash(?:es)?|error|failing|broken|regression|exception|panic|500|npe|null pointer)\b/i },
+  { label: "performance", test: /\b(slow|performance|latency|timeout|optimiz\w*|memory leak|throughput)\b/i },
+  { label: "feature", test: /\b(feature|add support|implement|new command|would be nice|request:|rfc)\b/i },
+  { label: "documentation", test: /\b(docs?|documentation|readme|comment|example)\b/i },
+  { label: "ui", test: /\b(ui|ux|layout|styling|css|dark mode|mobile|tooltip|button)\b/i },
+  { label: "git", test: /\b(clone|push|pull|fetch|rebase|merge|branch|hook|ref)\b/i },
+  { label: "ai", test: /\b(ai|llm|claude|prompt|embedding|semantic|reviewer)\b/i },
+  { label: "infrastructure", test: /\b(deploy|docker|compose|kubernetes|migration|database|postgres|redis|backup)\b/i },
+];
+
+/**
+ * Deterministic issue triage: suggest labels from the title+description.
+ * Capped at 3 labels, priority-ordered (security > bug > performance …)
+ * so the most actionable signal wins. Empty when nothing matches — the
+ * caller keeps user-supplied labels either way.
+ */
+export function triageLabels(title: string, description: string): string[] {
+  const text = `${title}\n${description ?? ""}`;
+  const hits: string[] = [];
+  for (const rule of LABEL_RULES) {
+    if (rule.test.test(text)) hits.push(rule.label);
+    if (hits.length >= 3) break;
+  }
+  return hits;
+}

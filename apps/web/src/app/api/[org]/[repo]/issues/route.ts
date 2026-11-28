@@ -7,7 +7,7 @@ import { db, intents, activities } from "@forge/db";
 
 export async function POST(req: Request, { params }: { params: Promise<{ org: string; repo: string }> }) {
   const { org, repo } = await params;
-  const body = (await req.json().catch(() => ({}))) as { title?: string; description?: string; kind?: string };
+  const body = (await req.json().catch(() => ({}))) as { title?: string; description?: string; kind?: string; labels?: string[] };
   const title = (body.title ?? "").trim();
   if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
 
@@ -18,6 +18,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
 
 
   const kind = body.kind === "spec" || body.kind === "issue" ? body.kind : "intent";
+
+  // Autonomous triage: when no labels are supplied, classify the issue
+  // deterministically (security/bug/perf/… keyword triage). User-provided
+  // labels always win; this only fills the empty case.
+  let labels: string[] = [];
+  if (Array.isArray(body.labels)) {
+    labels = [...new Set(body.labels.map((l) => String(l).trim()).filter(Boolean))].slice(0, 10);
+  } else if (title) {
+    try {
+      const { triageLabels } = await import("@forge/ai");
+      labels = triageLabels(title, body.description ?? "");
+    } catch { /* triage is best-effort */ }
+  }
   // Retry on unique-number conflicts from concurrent creates (mirrors the
   // PR-number retry in the post-receive handler).
   let intent: { id: number; number: number } | undefined;
@@ -35,7 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ org: st
           title,
           description: body.description ?? null,
           kind,
-          labels: [],
+          labels,
         })
         .returning({ id: intents.id, number: intents.number });
     } catch (err) {
