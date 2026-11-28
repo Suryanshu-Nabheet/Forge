@@ -237,6 +237,23 @@ secret shown once, delivery log, delete).
 - All SQL through Drizzle's parameterized builder; raw SQL only for the cosine function definition and queue claims (parameterized).
 - Preview runner: sanitized env, timeouts, output caps, process-group kill, lifecycle-script prescan.
 
+## 11b. Load profile (measured)
+
+ApacheBench against the production build (NODE_ENV=production, single
+process, local Postgres):
+
+| Path | Concurrency | rps | p50 latency | Failures |
+|---|---|---|---|---|
+| `/healthz` | 10 | 8,672 | 1.2ms | 0 |
+| `/` (dashboard, DB-backed) | 20 | 208 | — | 0 |
+| `/` (dashboard) | 50 | 276 | 3.6ms | 0 |
+| `/` (dashboard) | 100 | 300 | 3.3ms | 0 |
+
+Throughput scales near-linearly to 100 concurrent connections — the
+20-conn pg pool is not the bottleneck at page-shaped loads. Dev-mode
+(`next dev` on-demand compilation) measures ~32 rps; always benchmark
+the production build.
+
 ## 12. Testing & verification
 
 - `pnpm typecheck` — tsc across the monorepo
