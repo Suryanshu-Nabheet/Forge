@@ -4,7 +4,7 @@
 // rate-limited per process (authenticated users get the full budget).
 
 import { NextResponse } from "next/server";
-import { eq, inArray, or, and } from "drizzle-orm";
+import { eq, inArray, or, and, desc } from "drizzle-orm";
 import { db, embeddings, repositories, organizations, orgMembers } from "@forge/db";
 import { embedLocal, cosine } from "@forge/ai";
 import { currentUser } from "@/server/session";
@@ -26,21 +26,9 @@ function anonAllowed(): boolean {
   return ++anonCount <= MAX_ANON_PER_MIN;
 }
 
-export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user && !anonAllowed()) {
-    return NextResponse.json(
-      { error: "too many anonymous searches — sign in or wait a minute" },
-      { status: 429, headers: { "Retry-After": "60" } },
-    );
-  }
-  const body = (await req.json().catch(() => ({}))) as { q?: string; repoId?: number };
-  const q = (body.q ?? "").trim();
-  if (!q) return NextResponse.json({ results: [] });
 
-  // Visible repos: public always; private only orgs the user owns or
-  // belongs to (same predicate as roleInOrg).
-  const visFilter = user
+function visFilterFor(user: Awaited<ReturnType<typeof currentUser>>) {
+  return user
     ? or(
         eq(repositories.visibility, "public"),
         eq(organizations.ownerId, user.id),
@@ -50,6 +38,58 @@ export async function POST(req: Request) {
         ),
       )
     : eq(repositories.visibility, "public");
+}
+
+/** Grep the N most recently updated visible repos (bounded work per request). */
+async function grepAcrossVisible(q: string, regex: boolean, visFilter: ReturnType<typeof visFilterFor>) {
+  const { grepTree, revParse, repoGitDir } = await import("@forge/git");
+  const repos = await db
+    .select({ orgSlug: organizations.slug, name: repositories.name, defaultBranch: repositories.defaultBranch })
+    .from(repositories)
+    .innerJoin(organizations, eq(organizations.id, repositories.orgId))
+    .where(visFilter)
+    .orderBy(desc(repositories.updatedAt))
+    .limit(Number(process.env.FORGE_GREP_REPOS ?? 20));
+
+  const matches: Array<GrepMatch & { repo: string }> = [];
+  let scannedRepos = 0;
+  for (const r of repos) {
+    const gitDir = repoGitDir(r.orgSlug, r.name);
+    const sha = await revParse(gitDir, r.defaultBranch);
+    if (!sha) continue;
+    scannedRepos++;
+    const found = await grepTree(gitDir, sha, q, { regex, maxResults: 50 });
+    for (const m of found) matches.push({ ...m, repo: `${r.orgSlug}/${r.name}` });
+    if (matches.length >= 200) break;
+  }
+  return NextResponse.json({
+    matches: matches.slice(0, 200),
+    truncated: matches.length >= 200,
+    scannedRepos,
+  });
+}
+
+interface GrepMatch { path: string; line: number; content: string }
+
+export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user && !anonAllowed()) {
+    return NextResponse.json(
+      { error: "too many anonymous searches — sign in or wait a minute" },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+  const body = (await req.json().catch(() => ({}))) as { q?: string; repoId?: number; mode?: string; regex?: boolean };
+  const q = (body.q ?? "").trim();
+  if (!q) return NextResponse.json({ results: [] });
+
+  // Literal/regex mode: grep the most recently updated visible repos
+  // (bounded), returning per-file matches. Semantic mode continues below.
+  if (body.mode === "literal") {
+    return grepAcrossVisible(q, body.regex === true, visFilterFor(user));
+  }
+
+  const visFilter = visFilterFor(user);
 
   const qv = embedLocal(q, null);
 

@@ -4,11 +4,20 @@ import { prRiskColor } from "@/components/risk";
 
 export const dynamic = "force-dynamic";
 
-export default async function PullsPage({ params }: { params: Promise<{ org: string; repo: string }> }) {
+const PAGE_SIZE = 30;
+
+export default async function PullsPage({ params, searchParams }: {
+  params: Promise<{ org: string; repo: string }>;
+  searchParams: Promise<{ before?: string }>;
+}) {
   const { org, repo } = await params;
+  const { before } = await searchParams;
+  const beforeNum = before && /^\d+$/.test(before) ? Number(before) : undefined;
   const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const prs = await listPrs(info.repoId);
+  const prs = await listPrs(info.repoId, beforeNum, PAGE_SIZE);
+  const newest = prs[0]?.number;
+  const oldest = prs[prs.length - 1]?.number;
   const open = prs.filter((p) => p.status === "open");
   const closed = prs.filter((p) => p.status !== "open");
 
@@ -51,6 +60,16 @@ export default async function PullsPage({ params }: { params: Promise<{ org: str
           </a>
         ))}
       </div>
+      {prs.length === PAGE_SIZE && oldest !== undefined && (
+        <div className="mt-4 flex justify-between text-[13px]">
+          {beforeNum ? (
+            <a className="text-[var(--accent)] hover:underline"
+              href={`/${org}/${repo}/pulls?before=${newest}`}>→ newer</a>
+          ) : <span />}
+          <a className="text-[var(--accent)] hover:underline"
+            href={`/${org}/${repo}/pulls?before=${oldest}`}>older →</a>
+        </div>
+      )}
     </div>
   );
 }

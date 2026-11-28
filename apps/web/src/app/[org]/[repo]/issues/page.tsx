@@ -12,11 +12,20 @@ const STATUS_STYLE: Record<string, string> = {
   closed: "text-[var(--text-faint)]",
 };
 
-export default async function IssuesPage({ params }: { params: Promise<{ org: string; repo: string }> }) {
+const PAGE_SIZE = 30;
+
+export default async function IssuesPage({ params, searchParams }: {
+  params: Promise<{ org: string; repo: string }>;
+  searchParams: Promise<{ before?: string }>;
+}) {
   const { org, repo } = await params;
+  const { before } = await searchParams;
+  const beforeNum = before && /^\d+$/.test(before) ? Number(before) : undefined;
   const info = await findVisibleRepo(org, repo);
   if (!info) return <div className="text-[var(--text-dim)]">not found</div>;
-  const intents = await listIntents(info.repoId);
+  const intents = await listIntents(info.repoId, beforeNum, PAGE_SIZE);
+  const newest = intents[0]?.number;
+  const oldest = intents[intents.length - 1]?.number;
 
   return (
     <div>
@@ -49,6 +58,16 @@ export default async function IssuesPage({ params }: { params: Promise<{ org: st
           </a>
         ))}
       </div>
+      {intents.length === PAGE_SIZE && oldest !== undefined && (
+        <div className="mt-4 flex justify-between text-[13px]">
+          {beforeNum ? (
+            <a className="text-[var(--accent)] hover:underline"
+              href={`/${org}/${repo}/issues?before=${newest}`}>→ newer</a>
+          ) : <span />}
+          <a className="text-[var(--accent)] hover:underline"
+            href={`/${org}/${repo}/issues?before=${oldest}`}>older →</a>
+        </div>
+      )}
     </div>
   );
 }

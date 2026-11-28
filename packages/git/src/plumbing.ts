@@ -260,3 +260,53 @@ export async function blameFile(gitDir: string, sha: string, path: string, maxBy
   }
   return lines;
 }
+
+// ---------- literal code search ----------
+
+export interface GrepMatch {
+  path: string;
+  line: number;
+  content: string;
+}
+
+/**
+ * Literal or regex search across a commit's tree (git grep), bounded by
+ * maxResults. Patterns are passed as a single argv element — never a
+ * shell — so injection is not a concern; the caller validates ownership
+ * and scope.
+ */
+export async function grepTree(
+  gitDir: string,
+  rev: string,
+  pattern: string,
+  opts?: { regex?: boolean; maxResults?: number; maxLineLength?: number },
+): Promise<GrepMatch[]> {
+  const maxResults = opts?.maxResults ?? 200;
+  const args = ["grep", "-n", "-I", "--full-name", opts?.regex ? "-E" : "-F", pattern, rev];
+  let out: string;
+  try {
+    out = await gitIn(gitDir, args, { maxBuffer: 1024 * 1024 * 16 });
+  } catch {
+    // git grep exits 1 on no matches
+    return [];
+  }
+  const matches: GrepMatch[] = [];
+  const cap = opts?.maxLineLength ?? 300;
+  // Output format when a rev is given: `<rev>:<path>:<line>:<content>` —
+  // --full-name keeps the path free of ./ prefixes.
+  const revPrefix = `${rev}:`;
+  for (const line of out.split("\n")) {
+    if (matches.length >= maxResults) break;
+    const body = line.startsWith(revPrefix) ? line.slice(revPrefix.length) : line;
+    const idx = body.indexOf(":");
+    const numEnd = body.indexOf(":", idx + 1);
+    if (idx === -1 || numEnd === -1) continue;
+    const path = body.slice(0, idx);
+    const num = Number(body.slice(idx + 1, numEnd));
+    if (!Number.isInteger(num)) continue;
+    let content = body.slice(numEnd + 1);
+    if (content.length > cap) content = content.slice(0, cap) + "…";
+    matches.push({ path, line: num, content });
+  }
+  return matches;
+}

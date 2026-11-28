@@ -602,3 +602,68 @@ describe("repo front-door: README, raw files, blame", () => {
     expect(blameHtml).toMatch(/add readme|tweak line/);
   });
 });
+
+describe("literal code search + pagination", () => {
+  it("greps literal and regex patterns across repos", async () => {
+    // Grep scans default branches. Give the grep a deterministic target:
+    // a fresh repo whose (unprotected) main gets the README directly.
+    const mk = await sfetch(`/api/repos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orgSlug: "corp", name: "grep-repo", visibility: "public", description: "grep target" }),
+    });
+    expect(mk.ok).toBe(true);
+    const pat = await sfetch(`/api/pats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "t4", scopes: ["repo:read", "repo:write"] }),
+    });
+    const patBody = (await pat.json()) as { token: string };
+    const pushUrl = `http://eva:${patBody.token}@localhost:${PORT}/git/corp/grep-repo.git`;
+    await git(["-C", work, "checkout", "--quiet", "-b", "greptest"]);
+    await exec("bash", ["-c", `cd ${work} && printf '# GrepRepo\n\nHello **world**.\n' > README.md && printf 'line a\nline b\n' > g.txt`]);
+    await git(["-C", work, "add", "."]);
+    await git(["-C", work, "commit", "--quiet", "-m", "grep content"]);
+    await git(["-C", work, "push", "--quiet", pushUrl, "HEAD:refs/heads/main"]);
+    await git(["-C", work, "checkout", "--quiet", "frontdoor"]);
+
+    const res = await sfetch(`/api/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "literal", q: "Hello" }),
+    });
+    const data = (await res.json()) as { matches: Array<{ repo: string; path: string; line: number; content: string }>; scannedRepos: number };
+    expect(res.ok).toBe(true);
+    expect(data.scannedRepos).toBeGreaterThan(0);
+    const hit = data.matches.find((m) => m.path === "README.md");
+    expect(hit).toBeDefined();
+    expect(hit!.content).toContain("Hello **world**.");
+
+    const re = await sfetch(`/api/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "literal", q: "line [bc]", regex: true }),
+    });
+    const reData = (await re.json()) as { matches: Array<{ content: string }> };
+    expect(re.ok).toBe(true);
+    expect(reData.matches.some((m) => m.content.includes("line b changed"))).toBe(true);
+
+    // Per-repo grep endpoint is visibility-consistent: anonymous gets repo not found for private repos only.
+    const anon = await fetch(`${BASE}/api/corp/widget/grep`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: "Hello" }),
+    });
+    expect(anon.ok).toBe(true); // widget is public
+  });
+
+  it("paginates the pulls list with ?before=", async () => {
+    const page1 = await fetch(`${BASE}/corp/widget/pulls`);
+    expect(page1.ok).toBe(true);
+    // All PRs fit on one page (page size 30); before= beyond the oldest is empty.
+    const before = await fetch(`${BASE}/corp/widget/pulls?before=1`);
+    expect(before.ok).toBe(true);
+    const html = await before.text();
+    expect(html).toContain("No pull requests");
+  });
+});

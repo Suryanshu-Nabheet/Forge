@@ -1,7 +1,7 @@
 // Server-side data access for UI pages + REST API routes.
 // One module so both React server components and route handlers share logic.
 
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { db } from "@forge/db";
 import {
   users, organizations, repositories, branches, commits,
@@ -119,7 +119,7 @@ export async function repoCommits(gitDir: string, branchSha: string, limit = 30)
 
 // ---------- PRs ----------
 
-export async function listPrs(repoId: number): Promise<PrSummary[]> {
+export async function listPrs(repoId: number, before?: number, limit = 30): Promise<PrSummary[]> {
   const rows = await db
     .select({
       id: pullRequests.id,
@@ -138,8 +138,11 @@ export async function listPrs(repoId: number): Promise<PrSummary[]> {
     })
     .from(pullRequests)
     .leftJoin(users, eq(users.id, pullRequests.authorId))
-    .where(eq(pullRequests.repoId, repoId))
-    .orderBy(desc(pullRequests.number));
+    .where(before
+      ? and(eq(pullRequests.repoId, repoId), lt(pullRequests.number, before))
+      : eq(pullRequests.repoId, repoId))
+    .orderBy(desc(pullRequests.number))
+    .limit(limit);
   return rows.map((r) => ({
     ...r,
     authorHandle: r.authorHandle ?? "ghost",
@@ -210,7 +213,7 @@ export async function countUnreadNotifications(userId: number): Promise<number> 
 
 // ---------- intents ----------
 
-export async function listIntents(repoId: number): Promise<IntentSummary[]> {
+export async function listIntents(repoId: number, before?: number, limit = 30): Promise<IntentSummary[]> {
   const rows = await db
     .select({
       id: intents.id,
@@ -228,8 +231,11 @@ export async function listIntents(repoId: number): Promise<IntentSummary[]> {
     })
     .from(intents)
     .leftJoin(users, eq(users.id, intents.authorId))
-    .where(eq(intents.repoId, repoId))
-    .orderBy(desc(intents.number));
+    .where(before
+      ? and(eq(intents.repoId, repoId), lt(intents.number, before))
+      : eq(intents.repoId, repoId))
+    .orderBy(desc(intents.number))
+    .limit(limit);
   return rows.map((r) => ({
     id: r.id,
     number: r.number,
