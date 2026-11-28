@@ -57,9 +57,9 @@ beforeAll(async () => {
   await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE);`);
   await admin.query(`CREATE DATABASE ${TEST_DB};`);
   await admin.end();
-  await exec("pnpm", ["exec", "drizzle-kit", "push"], {
+  await exec("pnpm", ["exec", "tsx", "../../packages/db/src/migrate.ts"], {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB) },
+    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB), FORGE_MIGRATIONS_DIR: `${ROOT}/drizzle` },
   });
 
   // Wipe the storage root too: a stale bare repo survives DB resets and

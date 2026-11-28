@@ -12,9 +12,10 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "db:push": "pnpm --filter @forge/web exec drizzle-kit push",
-    "db:migrate": "pnpm --filter @forge/web exec drizzle-kit migrate",
+    "db:migrate": "pnpm --filter @forge/web exec tsx ../../packages/db/src/migrate.ts",
     "seed": "pnpm --filter @forge/web exec tsx scripts/seed.ts",
-    "worker": "pnpm --filter @forge/worker dev"
+    "worker": "pnpm --filter @forge/worker dev",
+    "db:generate": "pnpm --filter @forge/web exec drizzle-kit generate"
   },
   "devDependencies": {
     "turbo": "^2.5.8",

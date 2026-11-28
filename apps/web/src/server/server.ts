@@ -12,6 +12,10 @@ const port = Number(process.env.FORGE_PORT ?? 3000);
 process.env.FORGE_POST_RECEIVE_URL ??= `http://127.0.0.1:${port}/internal/hooks/post-receive`;
 
 async function main() {
+  // Apply pending migrations before anything reads the schema.
+  const { runMigrations } = await import("@forge/db");
+  await runMigrations();
+
   // Boot Next.js
   const nextApp = nextFactory({ dev, dir: process.cwd() });
   await nextApp.prepare();

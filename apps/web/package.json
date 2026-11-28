@@ -11,7 +11,9 @@
     "db:push": "drizzle-kit push",
     "seed": "tsx scripts/seed.ts",
     "start": "NODE_ENV=production tsx src/server/server.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx ../../packages/db/src/migrate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",

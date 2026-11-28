@@ -28,10 +28,11 @@ export async function setup(): Promise<void> {
   const dataDir = path.join(process.cwd(), "data-test");
   await fs.rm(dataDir, { recursive: true, force: true }).catch(() => {});
 
-  // Push the Drizzle schema into it.
-  await exec("pnpm", ["exec", "drizzle-kit", "push"], {
+  // Apply the versioned migrations — exercises the same path production
+  // boots run, and fails the suite if a migration diverges from the schema.
+  await exec("pnpm", ["exec", "tsx", "../../packages/db/src/migrate.ts"], {
     cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: testDbDsn(DB) },
+    env: { ...process.env, DATABASE_URL: testDbDsn(DB), FORGE_MIGRATIONS_DIR: `${process.cwd()}/drizzle` },
   });
 
   // Cosine function (mirrors the one shipped for dev).

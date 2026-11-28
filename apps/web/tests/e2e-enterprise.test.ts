@@ -74,9 +74,9 @@ beforeAll(async () => {
   }
   await admin.query(`CREATE DATABASE ${TEST_DB}`);
   await admin.end();
-  await exec("pnpm", ["exec", "drizzle-kit", "push"], {
+  await exec("pnpm", ["exec", "tsx", "../../packages/db/src/migrate.ts"], {
     cwd: ROOT,
-    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB) },
+    env: { ...process.env, DATABASE_URL: testDbDsn(TEST_DB), FORGE_MIGRATIONS_DIR: `${ROOT}/drizzle` },
   });
   await rm(DATA, { recursive: true, force: true }).catch(() => {});
   await db.connect();
