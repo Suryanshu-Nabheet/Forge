@@ -3,6 +3,7 @@ import { listBranchesDb, resolveBranchSha, repoTree, repoBlob, repoCommits } fro
 import { repoGitDir } from "@forge/git";
 import Link from "next/link";
 import { Markdown } from "@/components/Markdown";
+import { highlightCode, langFor } from "@/server/highlight";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,13 @@ export default async function CodePage({ params, searchParams }: PageProps) {
   const commits = sha ? await repoCommits(gitDir, sha, 10) : [];
   const blob = fileBlob;
 
+  // Syntax-highlight plain text files in the viewer.
+  let highlighted = "";
+  if (isFile && blob?.content && !blob.isBinary) {
+    const lang = langFor(treePath);
+    if (lang) highlighted = await highlightCode(blob.content, lang);
+  }
+
   // README panel: find a README* entry in this directory and render it.
   const readmeEntry = entries.find((e) => /^readme(\.\w+)?$/i.test(e.path.split("/").pop() ?? ""));
   let readme: { path: string; content: string } | null = null;
@@ -54,7 +62,7 @@ export default async function CodePage({ params, searchParams }: PageProps) {
         </div>
 
         {isFile && blob ? (
-          <FileView org={org} repo={repo} branch={branch} sha={sha} path={treePath} blob={blob} />
+          <FileView org={org} repo={repo} branch={branch} sha={sha} path={treePath} blob={blob} highlighted={highlighted} />
         ) : (
           <div className="card divide-y">
             {treePath && <UpDir org={org} repo={repo} branch={branch} treePath={treePath} />}
@@ -147,9 +155,10 @@ function TreeRow({ org, repo, branch, entry, treePath }: {
   );
 }
 
-function FileView({ org, repo, branch, sha, path, blob }: {
+function FileView({ org, repo, branch, sha, path, blob, highlighted }: {
   org: string; repo: string; branch: string; sha: string | null;
   path: string; blob: { content: string | null; isBinary: boolean };
+  highlighted?: string;
 }) {
   const rawUrl = `/raw/${org}/${repo}/${path}?ref=${encodeURIComponent(branch)}`;
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
@@ -184,6 +193,11 @@ function FileView({ org, repo, branch, sha, path, blob }: {
         <div className="p-4 text-[13px] leading-relaxed">
           <Markdown text={blob.content} />
         </div>
+      ) : highlighted ? (
+        // shiki output is theme-colored; line anchors are lost in the
+        // pre-form, so the numbered list stays available via the raw view.
+        <div className="overflow-x-auto p-4" style={{ maxHeight: "70vh" }}
+          dangerouslySetInnerHTML={{ __html: highlighted }} />
       ) : (
         <pre className="overflow-x-auto p-4 text-[12.5px] mono leading-relaxed" style={{ maxHeight: "70vh" }}>
           {lines.map((content, i) => (
